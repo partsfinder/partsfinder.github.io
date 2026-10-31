@@ -366,7 +366,7 @@ function chooseEngine(e){const my=++st.ver;st.engine=e;st.spec=null;st.sel=null;
   $('#rIds').innerHTML=[v.vinStr?`VIN <code>${esc(v.vinStr)}</code>`:'',v.rego?`Rego <code>${esc(v.rego)}</code>`:''].filter(Boolean).join(' · ');
   $('#rOverview').innerHTML='';
   $('#specs').innerHTML=skel('Loading specifications…');$('#uncertain').textContent='';$('#fluids').innerHTML=skel('Loading…');$('#service').innerHTML='';$('#torque').innerHTML='';$('#issues').innerHTML=skel('Loading…');$('#ans').innerHTML='';
-  $('#psq').value='';$('#abbrHint').textContent='';renderCats();renderRepcoPanel();renderDiagrams();
+  $('#psq').value='';$('#abbrHint').textContent='';renderCats();renderRepcoPanel();renderDiagrams();renderResources();$('#resWeb').innerHTML='';
   st.s=normSpec(guessFromLabel(e));renderDiagram();renderDetail();renderLinks();
   $('#result').scrollIntoView({behavior:'smooth',block:'start'});
   $('#presults').innerHTML='<p class="muted">Search for a part above, or tap a category.</p>';
@@ -625,6 +625,35 @@ ${smcLinks(v)}<div class="small muted" style="margin-top:10px">Find the exact di
   $('#dgFile').onchange=async e=>{const pgs=loadRepco();let n=0;for(const f of e.target.files){try{const img=await shrinkImg(f);pgs.push({diagramOnly:true,vehicle:v.vehicle,vin:v.vinStr||'',source:f.name,date:new Date().toISOString().slice(0,10),items:[],diagrams:[{src:img,title:f.name.replace(/\.[a-z]+$/i,'').replace(/[_-]+/g,' ')}]});n++;}catch(err){}}
     saveRepco(pgs);toast(n?`Added ${n} diagram${n>1?'s':''} for ${vs}`:'Couldn’t read that image');setTimeout(()=>toast(''),3000);renderDiagrams();};
   $$('[data-dgdel]').forEach(b=>b.onclick=()=>{const[pi,di]=b.dataset.dgdel.split(':').map(Number);const pgs=loadRepco();const pg=pgs[pi];if(!pg)return;pg.diagrams.splice(di,1);if(pg.diagramOnly&&!pg.diagrams.length)pgs.splice(pi,1);saveRepco(pgs);renderDiagrams();});}
+/* ---------- Resources: where the info lives (real links only) ---------- */
+const RES_NEEDS=[['parts','Parts & numbers','parts'],['oem','Genuine OEM','parts catalogue'],['diagrams','Diagrams & manuals','workshop manual diagram'],['belt','Belt routing','drive belt routing diagram'],['fuse','Fuse box','fuse box diagram'],['specs','Specs & torque','specifications torque'],['fluids','Fluids & capacities','oil capacity coolant type'],['forums','Forums & fixes','forum problem fix']];
+const RES={
+ oem:[['Partsouq','partsouq.com','Genuine catalogue by VIN, exploded diagrams',v=>v.vinStr?`https://partsouq.com/en/search/all?q=${v.vinStr}`:null],['Amayama','amayama.com','Genuine Japanese and Korean catalogues'],['Megazip','megazip.net','Genuine Japanese catalogues with diagrams'],['7zap','7zap.com','Genuine EPC diagrams, many makes'],['Catcar','catcar.info','Genuine EPC catalogues'],['RealOEM','realoem.com','Genuine BMW and MINI diagrams']],
+ stores:[['Repco','repco.com.au','Catalogue and stock',(v,t)=>`https://www.repco.com.au/search?text=${encodeURIComponent(t)}`],['Supercheap Auto','supercheapauto.com.au','Catalogue and stock'],['Autobarn','autobarn.com.au','Catalogue and stock'],['Burson','burson.com.au','Trade parts'],['Sparesbox','sparesbox.com.au','Online parts'],['Autopro','autopro.com.au','Parts stores'],['Auto One','autoone.com.au','Parts stores'],['eBay Australia','ebay.com.au','New and used',(v,t)=>`https://www.ebay.com.au/sch/i.html?_nkw=${encodeURIComponent(t)}`]],
+ brands:[['Ryco','ryco.com.au','Filter finder'],['Wesfil','wesfil.com.au','Filter finder'],['Narva','narva.com.au','Globes and electrical'],['NGK','ngk.com.au','Plugs, glow plugs, sensors'],['Bendix','bendix.com.au','Brake pads'],['DBA','dba.com.au','Rotors and calipers'],['Gates','gatesaustralia.com.au','Belts, hoses, routing'],['Dayco','dayco.com.au','Belts, tensioners, routing'],['Century','centurybatteries.com.au','Battery finder'],['Bosch','bosch.com.au','Wipers, filters, parts'],['KYB','kyb.com.au','Shocks and struts'],['Pedders','pedders.com.au','Suspension']],
+ manuals:[['StartMyCar','startmycar.com','Fuse boxes, manuals, guides'],['ManualsLib','manualslib.com','Owner’s and service manuals'],['Haynes','haynes.com','Workshop manuals'],['fuse-box.info','fuse-box.info','Fuse box diagrams by model'],['YouTube','youtube.com','Watch the job done',(v,t)=>`https://www.youtube.com/results?search_query=${encodeURIComponent(t)}`]],
+ specs:[['RedBook','redbook.com.au','Australian model specs'],['Drive','drive.com.au','AU specs and reviews'],['CarsGuide','carsguide.com.au','AU specs and common problems'],['auto-data.net','auto-data.net','Engine and model specs'],['Ultimate Specs','ultimatespecs.com','Detailed specs']],
+ forums:[['Whirlpool','whirlpool.net.au','Australian forums'],['Reddit','reddit.com','r/MechanicAdvice and model subs'],['Model forums','','Owners’ clubs and forums',(v,t)=>`https://www.google.com/search?q=${encodeURIComponent(t+' forum')}`]]};
+const RES_GROUPS={parts:['stores','brands','oem'],oem:['oem','stores'],diagrams:['manuals','oem'],belt:['brands','manuals','forums'],fuse:['manuals','brands','forums'],specs:['specs','manuals','forums'],fluids:['specs','manuals'],forums:['forums','manuals']};
+const RES_TITLES={oem:'Genuine catalogues',stores:'Australian parts stores',brands:'Brand catalogues',manuals:'Diagrams and manuals',specs:'Specs',forums:'Forums and owners'};
+let resNeed='parts';
+function renderResources(){const box=$('#resList');if(!box||!st.vehicle||st.vehicle.manual)return;const v=st.vehicle;const vs=vshort()+(st.engine?.code?' '+st.engine.code:'');
+  const term=RES_NEEDS.find(n=>n[0]===resNeed)[2];const t=`${vs} ${term}`.trim();
+  $('#resChips').innerHTML=RES_NEEDS.map(n=>`<button class="chip ${resNeed===n[0]?'on':''}" data-res="${n[0]}" type="button">${n[1]}</button>`).join('');
+  $$('#resChips .chip').forEach(b=>b.onclick=()=>{resNeed=b.dataset.res;renderResources();$('#resWeb').innerHTML='';});
+  const gs=(d,q)=>`https://www.google.com/search?q=${encodeURIComponent(q+' site:'+d)}`;
+  const BRAND_FOR={belt:['Gates','Dayco'],fuse:['Narva'],parts:null};const pick=g=>g==='brands'&&BRAND_FOR[resNeed]!==undefined&&BRAND_FOR[resNeed]?RES.brands.filter(b=>BRAND_FOR[resNeed].includes(b[0])):RES[g];
+  box.innerHTML=RES_GROUPS[resNeed].map(g=>`<div class="resgrp"><div class="nlab">${RES_TITLES[g]}</div><div class="links">${pick(g).map(([n,d,desc,fn])=>{const u=(fn&&fn(v,t))||(d?gs(d,t):null);return u?`<a class="lk" href="${esc(u)}" target="_blank" rel="noopener"><b>${esc(n)} ↗</b><span>${esc(desc)}</span></a>`:'';}).join('')}</div></div>`).join('');
+  $('#resQuery').textContent=t;}
+async function findWebPages(){const out=$('#resWeb');const vs=vshort()+(st.engine?.code?' '+st.engine.code:'');const need=RES_NEEDS.find(n=>n[0]===resNeed);
+  if(!canVerify()){out.innerHTML=errBox({code:'nokey'});return;}
+  out.innerHTML=skel(`Searching the web for ${need[1].toLowerCase()} for ${vs}…`);const meta={};
+  try{const r=await ask(`Use Google search to find the most useful web pages for this need. ${ctxLine()} Need: ${need[1]} (${need[2]}). Prefer official, genuine catalogue, manual and well-known Australian sources, then forums. Search several times with different wording. Return ONLY JSON {"pages":[{"title":"","url":"","why":"one short line"}]} listing up to 12 pages you actually found.`,{json:true,web:true,meta,tier:'default',maxTokens:4000});
+    const real=(meta.sources||[]).filter(x=>x.uri);const listed=(r.pages||[]).filter(x=>x&&/^https?:/.test(x.url||''));const host=u=>String(u).replace(/^https?:\/\/(www\.)?/,'').split('/')[0];
+    const seen=new Set();const rows=[];
+    real.forEach(x=>{const k=x.uri;if(seen.has(k))return;seen.add(k);const isRedirect=/vertexaisearch|grounding-api-redirect/.test(x.uri);const m=listed.find(l=>(x.title||'').toLowerCase().includes(host(l.url))||l.url===x.uri);rows.push({title:m?.title||x.title,url:x.uri,why:m?.why||'',domain:isRedirect?(x.title||''):host(x.uri)});});
+    out.innerHTML=rows.length?`<div class="small muted" style="margin:8px 0 6px">Pages the search actually found:</div><div class="links">${rows.slice(0,15).map(x=>`<a class="lk" href="${esc(x.url)}" target="_blank" rel="noopener"><b>${esc(x.title||x.domain)} ↗</b><span>${esc(x.domain||'')}${x.why?' · '+esc(x.why):''}</span></a>`).join('')}</div>`:'<p class="muted small">The search didn’t return any pages this time. Try another need or tap again.</p>';}
+  catch(e){out.innerHTML=errBox(e);}}
 /* ---------- engine detail panel (called by diagram.js) ---------- */
 function renderDetail(){const el=$('#detail'),c=st.sel;if(!c){el.innerHTML='<p class="muted" style="margin:0">Tap any part of the engine, or a chip above, to see what it does on this engine.</p>';return;}
   const note=st.spec?.components?.[c],gen=GEN[c]||'',manual=st.vehicle?.manual;
@@ -666,6 +695,7 @@ function renderLinks(){const v=st.vehicle,code=st.spec?.engine?.code||st.engine?
 $('#askf').addEventListener('submit',ev=>{ev.preventDefault();const q=$('#askq').value.trim();if(!q||!st.engine)return;answer(`${ctx()}\n\nQuestion from the owner (in Australia): ${q}\n\nAnswer directly and practically for this exact vehicle. Metric units. Flag anything you're unsure of. Under 300 words.`,$('#ans'));});
 $$('#secnav button').forEach(b=>b.onclick=()=>document.getElementById(b.dataset.go)?.scrollIntoView({behavior:'smooth',block:'start'}));
 
+$('#resFind').onclick=findWebPages;
 /* ---------- settings panel ---------- */
 function openSettings(){$('#sRules').value=cfg.rules??DEFAULT_RULES;$('#sGroq').value=cfg.groqKey||'';$('#sStore').value=cfg.store||'Repco';$('#sBrands').value=cfg.brands||DEFAULT_BRANDS;$('#sGem').value=cfg.geminiKey||'';$('#sSpeed').value=cfg.speed||'fast';const pv=cfg.provider||'gemini';$$('input[name=prov]').forEach(r=>r.checked=r.value===pv);provUI();$('#sKey').value=cfg.apiKey||'';$('#sModel').value=cfg.model||'claude-sonnet-5-5';$('#sLive').checked=!!cfg.live;$('#sReg').value=cfg.regcheck||'';$('#sClaude').hidden=!sample;$('#settings').hidden=false;}
 $('#setBtn').onclick=openSettings;$('#aiBadge').onclick=openSettings;

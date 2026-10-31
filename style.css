@@ -262,3 +262,7 @@ textarea{background:#0b1017;border:1px solid #2b3542;color:var(--text);border-ra
 .dgadd{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
 .dgadd label.btn{cursor:pointer}
 .smc{margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#0e141b}
+
+.resgrp{margin-top:12px}.resgrp .nlab{display:block;margin-bottom:6px}
+.links{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+#sec-resources .links{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px}#sec-resources .lk{padding:8px 10px}#sec-resources .lk span{font-size:12px}

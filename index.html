@@ -7,7 +7,7 @@
 <meta name="description" content="Find every part on your car by rego, VIN or model: OEM numbers, sizes, cross-references to Australian brands, and interactive engine diagrams.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=1793438606">
+<link rel="stylesheet" href="style.css?v=1793439001">
 </head>
 <body>
 <header class="top">
@@ -87,6 +87,7 @@
     </div>
     <nav class="secnav" id="secnav">
       <button class="ai" data-go="sec-parts">Parts</button>
+      <button class="ai" data-go="sec-resources">Where to find it</button>
       <button class="ai" data-go="sec-diagrams">Diagrams</button>
       <button data-go="sec-diagram">Engine (generic)</button>
       <button class="ai" data-go="sec-specs">Specs</button>
@@ -103,6 +104,15 @@
       <div id="repcoPanel"></div>
       <div id="cats" class="cats"></div>
       <div id="presults"></div>
+    </section>
+
+    <section class="card ai" id="sec-resources">
+      <h3>Where to find it</h3>
+      <p class="small muted" style="margin-top:-4px">One-tap searches of the sites that hold this information for <b id="resQuery"></b></p>
+      <div id="resChips" class="chips"></div>
+      <div id="resList"></div>
+      <div class="row" style="margin-top:12px;align-items:center"><button class="btn sm primary" id="resFind" type="button">&#128270; Find more pages on the web</button><span class="small muted">Live search; lists the real pages it finds.</span></div>
+      <div id="resWeb"></div>
     </section>
 
     <section class="card ai" id="sec-diagrams">
@@ -189,7 +199,7 @@
   </div>
 </div>
 
-<script src="diagram.js?v=1793438606"></script>
-<script src="app.js?v=1793438606"></script>
+<script src="diagram.js?v=1793439001"></script>
+<script src="app.js?v=1793439001"></script>
 </body>
 </html>
