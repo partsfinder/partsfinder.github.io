@@ -8,11 +8,11 @@ function saveCfg(){try{localStorage.setItem(CFG_KEY,JSON.stringify(cfg))}catch(e
 /* ---------- AI layer: Claude inside claude.ai, or the user's own Anthropic API key anywhere else ---------- */
 let sample=null;
 const samplePromise=(async()=>{try{if(window.claude&&typeof window.claude.use==='function')sample=await window.claude.use('sample');}catch(e){sample=null}updateAiBadge();return sample;})();
-function aiMode(){if(cfg.apiKey)return'api';if(sample)return'claude';return'none';}
-const liveOn=()=>aiMode()==='api'&&!!cfg.live;
+function aiMode(){const prov=cfg.provider||'gemini';if(prov==='gemini'&&cfg.geminiKey)return'gemini';if(prov==='anthropic'&&cfg.apiKey)return'api';if(cfg.geminiKey)return'gemini';if(cfg.apiKey)return'api';if(sample)return'claude';return'none';}
+const liveOn=()=>(aiMode()==='api'||aiMode()==='gemini')&&!!cfg.live;
 function updateAiBadge(){const m=aiMode(),b=$('#aiBadge');if(!b)return;
-  b.textContent=m==='api'?(cfg.live?'API · live search':'API key'):m==='claude'?'Claude':'Set up lookups';b.className='badge '+(m==='none'?'bad':'ok');
-  const n=$('#aiNote');if(n){n.hidden=m!=='none';n.innerHTML='Lookups need an AI engine. Open <b>Settings</b> and add an Anthropic API key (it stays in this browser). Engine sketches work without one.';}}
+  b.textContent=(m==='gemini'?'Gemini':m==='api'?'Claude API':m==='claude'?'Claude':'Set up lookups')+((m==='gemini'||m==='api')&&cfg.live?' · live':'');b.className='badge '+(m==='none'?'bad':'ok');
+  const n=$('#aiNote');if(n){n.hidden=m!=='none';n.innerHTML='Lookups need an AI key. Open <b>Settings</b> and paste a free Google Gemini key (takes a minute to get). Engine sketches work without one.';}}
 function parseLoose(t){if(t==null)throw new Error('Empty answer');if(typeof t==='object')return t;t=String(t);
   const fence=t.match(/```(?:json)?\s*([\s\S]*?)```/i);if(fence&&fence[1].includes('{'))t=fence[1];
   const a=t.indexOf('{'),b=t.lastIndexOf('}');if(a<0||b<0)throw new Error('The answer had no data in it');return JSON.parse(t.slice(a,b+1));}
@@ -24,16 +24,30 @@ async function apiCall(prompt,{web=false,maxTokens=12000}={}){
   const j=await r.json().catch(()=>({}));
   if(!r.ok){const x=new Error(j?.error?.message||('HTTP '+r.status));x.code=r.status===429||r.status===529?'rate_limited':r.status===401||r.status===403?'bad_key':'api';throw x;}
   return(j.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');}
+const GEM_MODELS=['gemini-flash-latest','gemini-3.7-flash','gemini-3.6-flash','gemini-3.5-flash','gemini-3-flash-preview','gemini-2.5-flash'];
+async function geminiCall(prompt,{web=false,maxTokens=24000}={}){const list=[...new Set([cfg.gModel,...GEM_MODELS].filter(Boolean))];let last;
+  for(const m of list){const body={contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:maxTokens}};if(web)body.tools=[{google_search:{}}];
+    let r;try{r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':cfg.geminiKey},body:JSON.stringify(body)});}
+    catch(e){const x=new Error('Couldn’t reach the Gemini API from this page.');x.code='network';throw x;}
+    const j=await r.json().catch(()=>({}));
+    if(r.ok){if(cfg.gModel!==m){cfg.gModel=m;saveCfg();}const c=j.candidates?.[0];const t=(c?.content?.parts||[]).filter(p=>p.text&&!p.thought).map(p=>p.text).join('');
+      if(!t)throw new Error(c?.finishReason?`No answer (${c.finishReason}). Try again or reword the search.`:'Empty answer');return t;}
+    const msg=j?.error?.message||('HTTP '+r.status);last=new Error(msg);
+    last.code=(r.status===401||r.status===403||(r.status===400&&/api key/i.test(msg)))?'bad_key':r.status===429?'rate_limited':'api';
+    if(r.status===404||(r.status===429&&/limit: ?0|free.?tier/i.test(msg))){if(cfg.gModel===m){cfg.gModel='';}continue;}
+    throw last;}
+  throw last;}
 async function ask(prompt,o={}){await samplePromise;const m=aiMode();if(m==='none')throw{code:'nokey'};let text;
-  if(m==='api'){try{text=await apiCall(prompt,o);}catch(e){if(o.web&&e.code==='api'){text=await apiCall(prompt,{...o,web:false});}else throw e;}}
+  if(m==='gemini'){try{text=await geminiCall(prompt,o);}catch(e){if(o.web&&e.code==='api'){text=await geminiCall(prompt,{...o,web:false});}else throw e;}}
+  else if(m==='api'){try{text=await apiCall(prompt,o);}catch(e){if(o.web&&e.code==='api'){text=await apiCall(prompt,{...o,web:false});}else throw e;}}
   else{if(o.json&&typeof sample.json==='function'){try{return parseLoose(await sample.json(prompt,{modelTier:o.tier||'default'}));}catch(e){if(e&&e.code)throw e;}}
     const r=await sample(prompt,{modelTier:o.tier||'default',cache:o.cache});text=r.text;}
   return o.json?parseLoose(text):text;}
 function errMsg(e){if(!e)return'Something went wrong.';
-  if(e.code==='nokey')return'No AI engine is set up yet. Open Settings and add an Anthropic API key.';
+  if(e.code==='nokey')return'No AI key set up yet. Open Settings and paste your free Gemini key.';
   if(e.code==='bad_key')return'The API key was rejected. Check it in Settings.';
   if(e.code==='not_granted')return'Claude access wasn’t allowed for this page. Allow it, or add an API key in Settings.';
-  if(e.code==='rate_limited')return'Too many lookups just now. Wait a minute and try again.';
+  if(e.code==='rate_limited')return'Hit the speed limit for your key. Wait a minute and try again.';
   return'Lookup failed: '+(e.message||String(e));}
 const errBox=e=>`<div class="errbox">${esc(errMsg(e))}${e&&(e.code==='nokey'||e.code==='bad_key')?' <button class="linkbtn" data-open-settings type="button">Open settings</button>':''}</div>`;
 const skel=t=>`<div class="skel"><span class="spin"></span>${esc(t)}</div>`;
@@ -259,11 +273,13 @@ $('#askf').addEventListener('submit',ev=>{ev.preventDefault();const q=$('#askq')
 $$('#secnav button').forEach(b=>b.onclick=()=>document.getElementById(b.dataset.go)?.scrollIntoView({behavior:'smooth',block:'start'}));
 
 /* ---------- settings panel ---------- */
-function openSettings(){$('#sKey').value=cfg.apiKey||'';$('#sModel').value=cfg.model||'claude-sonnet-5-5';$('#sLive').checked=!!cfg.live;$('#sReg').value=cfg.regcheck||'';$('#sClaude').hidden=!sample;$('#settings').hidden=false;}
+function openSettings(){$('#sGem').value=cfg.geminiKey||'';const pv=cfg.provider||'gemini';$$('input[name=prov]').forEach(r=>r.checked=r.value===pv);provUI();$('#sKey').value=cfg.apiKey||'';$('#sModel').value=cfg.model||'claude-sonnet-5-5';$('#sLive').checked=!!cfg.live;$('#sReg').value=cfg.regcheck||'';$('#sClaude').hidden=!sample;$('#settings').hidden=false;}
 $('#setBtn').onclick=openSettings;$('#aiBadge').onclick=openSettings;
 $('#sClose').onclick=()=>$('#settings').hidden=true;
 $('#settings').addEventListener('click',e=>{if(e.target.id==='settings')$('#settings').hidden=true;});
-$('#sSave').onclick=()=>{cfg.apiKey=$('#sKey').value.trim();cfg.model=$('#sModel').value;cfg.live=$('#sLive').checked;cfg.regcheck=$('#sReg').value.trim();saveCfg();$('#settings').hidden=true;};
+function provUI(){const pv=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';$('#pGem').hidden=pv!=='gemini';$('#pAnt').hidden=pv!=='anthropic';}
+$$('input[name=prov]').forEach(r=>r.onchange=provUI);
+$('#sSave').onclick=()=>{cfg.provider=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';cfg.geminiKey=$('#sGem').value.trim();cfg.apiKey=$('#sKey').value.trim();cfg.model=$('#sModel').value;cfg.live=$('#sLive').checked;cfg.regcheck=$('#sReg').value.trim();saveCfg();$('#settings').hidden=true;};
 $('#sClear').onclick=()=>{cfg={};saveCfg();openSettings();};
 
 /* ---------- manual sketch + recent ---------- */

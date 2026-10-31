@@ -136,19 +136,28 @@
     </section>
   </div>
 
-  <footer>Part numbers, sizes and cross-references are written by AI from what it knows about each vehicle and can be wrong or out of date, especially around model-year and build-date splits. Confirm by VIN with a parts counter or OEM catalogue before you buy, and check torque figures against a workshop manual. Store links open searches; PartsFinder has no affiliation with any retailer.</footer>
+  <footer>Part numbers, sizes and cross-references are written by AI (Google Gemini or Anthropic Claude) from what it knows about each vehicle and can be wrong or out of date, especially around model-year and build-date splits. Confirm by VIN with a parts counter or OEM catalogue before you buy, and check torque figures against a workshop manual. Store links open searches; PartsFinder has no affiliation with any retailer.</footer>
 </main>
 
 <div id="settings" class="overlay" hidden>
   <div class="dialog card" role="dialog" aria-label="Settings">
     <div class="dhead"><h3 style="margin:0">Settings</h3><button class="x" id="sClose" type="button" aria-label="Close">×</button></div>
     <p id="sClaude" class="note small" hidden>You're viewing this inside Claude, so lookups already work without a key. A key adds live retailer search.</p>
-    <label class="lab" for="sKey" style="margin-top:12px">Anthropic API key</label>
-    <input id="sKey" type="password" placeholder="sk-ant-…" style="width:100%">
-    <p class="small muted">Powers all lookups when the site runs outside Claude. It's kept only in this browser's storage and sent straight to api.anthropic.com. Usage is billed to your Anthropic account. Get one at console.anthropic.com.</p>
-    <label class="lab" for="sModel">Model</label>
-    <select id="sModel" style="width:100%"><option value="claude-sonnet-5-5">Claude Sonnet 5.5 (recommended)</option><option value="claude-opus-5-5">Claude Opus 5.5 (most thorough, slower)</option><option value="claude-haiku-5-5">Claude Haiku 5.5 (fastest, cheapest)</option></select>
-    <label class="check"><input id="sLive" type="checkbox"> Live retailer search: checks real Repco, Supercheap, Burson and other listings on the web and verifies cross-references (slower, uses more credit)</label>
+    <label class="lab" style="margin-top:12px">AI engine</label>
+    <div class="provs"><label class="check" style="margin:0"><input type="radio" name="prov" value="gemini"> Google Gemini <b style="color:var(--ok)">&nbsp;free</b></label><label class="check" style="margin:0"><input type="radio" name="prov" value="anthropic"> Anthropic Claude (paid)</label></div>
+    <div id="pGem">
+      <label class="lab" for="sGem" style="margin-top:12px">Gemini API key</label>
+      <input id="sGem" type="password" placeholder="AIza&hellip;" style="width:100%">
+      <p class="small muted">Free, no card needed: sign in at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, tap <b>Create API key</b> and paste it here. The free tier has a per-minute limit, and Google may use free-tier requests to improve its products. The key stays in this browser only.</p>
+    </div>
+    <div id="pAnt" hidden>
+      <label class="lab" for="sKey" style="margin-top:12px">Anthropic API key</label>
+      <input id="sKey" type="password" placeholder="sk-ant-&hellip;" style="width:100%">
+      <p class="small muted">Pay-as-you-go from console.anthropic.com. Kept only in this browser.</p>
+      <label class="lab" for="sModel">Model</label>
+      <select id="sModel" style="width:100%"><option value="claude-sonnet-5-5">Claude Sonnet 5.5 (recommended)</option><option value="claude-opus-5-5">Claude Opus 5.5 (most thorough, slower)</option><option value="claude-haiku-5-5">Claude Haiku 5.5 (fastest, cheapest)</option></select>
+    </div>
+    <label class="check"><input id="sLive" type="checkbox"> Live retailer search: checks real Repco, Supercheap, Burson and other listings on the web and verifies cross-references (slower; free on Gemini up to 5,000 searches a month)</label>
     <label class="lab" for="sReg" style="margin-top:12px">RegCheck username (optional)</label>
     <input id="sReg" type="text" placeholder="carregistrationapi.com.au username" style="width:100%">
     <p class="small muted">Turns a rego plate into a VIN automatically. It's a paid third-party service and may block browser requests. Without it, the Rego tab links to your state's free check.</p>
