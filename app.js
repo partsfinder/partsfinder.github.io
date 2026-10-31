@@ -52,19 +52,28 @@ async function geminiOnce(prompt,m,o={},ms){let think=!cfg.gNoThink;
       if(!t){const x=new Error(c?.finishReason?`No answer (${c.finishReason}).`:(j.promptFeedback?.blockReason?`Blocked (${j.promptFeedback.blockReason}).`:'Empty answer.'));x.code='empty';throw x;}return t;}
     const msg=j?.error?.message||('HTTP '+r.status);
     if(r.status===400&&think&&/think/i.test(msg)){think=false;cfg.gNoThink=true;saveCfg();continue;}
-    const x=new Error(msg);x.status=r.status;x.code=(r.status===401||r.status===403||(r.status===400&&/api key/i.test(msg)))?'bad_key':r.status===429?'rate_limited':'api';throw x;}}
-async function geminiCall(prompt,{web=false,maxTokens=16000,tier='default',meta=null}={}){const all=await geminiModels();const fast=tier==='quick'||(tier==='parts'&&(cfg.speed||'fast')==='fast');
+    const x=new Error(msg);x.status=r.status;const det=j?.error?.details||[];const ri=det.find(d=>/RetryInfo/.test(d['@type']||''));x.retry=ri?parseFloat(ri.retryDelay)||0:0;x.daily=/per ?day|PerDay|daily/i.test(JSON.stringify(det)+msg);x.code=(r.status===401||r.status===403||(r.status===400&&/api key/i.test(msg)))?'bad_key':r.status===429?'rate_limited':'api';throw x;}}
+let gChain=Promise.resolve();
+function toast(t){let el=$('#toast');if(!el){el=document.createElement('div');el.id='toast';el.className='toast';document.body.appendChild(el);}if(!t){el.classList.remove('on');return;}el.textContent=t;el.classList.add('on');}
+async function waitSecs(n,why){for(let k=Math.ceil(n);k>0;k--){toast(`${why} Retrying in ${k}s…`);await new Promise(r=>setTimeout(r,1000));}toast('');}
+function geminiCall(prompt,o={}){const run=()=>geminiCallInner(prompt,o);const p=gChain.then(run,run);gChain=p.catch(()=>{});return p;}
+async function geminiCallInner(prompt,{web=false,maxTokens=16000,tier='default',meta=null}={},round=0){const all=await geminiModels();const fast=tier==='quick'||(tier==='parts'&&(cfg.speed||'fast')==='fast');
   let list=fast?[...all.filter(m=>/lite/.test(m)),...all.filter(m=>!/lite/.test(m))]:all;
   list=[...list.filter(m=>!gSlow.has(m)),...list.filter(m=>gSlow.has(m))];
-  const ms=web?100000:tier==='quick'?25000:60000;let last=null,tries=0;
-  for(const m of list){if(tries>=4)break;tries++;
+  const ms=web?100000:tier==='quick'?25000:60000;let last=null,tries=0,rl=[];
+  for(const m of list){if(tries>=5)break;tries++;
     try{const t=await geminiOnce(prompt,m,{web,maxTokens,meta},ms);gSlow.delete(m);if(!/lite/.test(m)&&cfg.gModel!==m){cfg.gModel=m;saveCfg();}return t;}
     catch(e){last=e;
       if(e.code==='bad_key'||e.code==='network')throw e;
       if(e.code==='timeout'){gSlow.add(m);continue;}
+      if(e.code==='rate_limited'){rl.push(e);continue;}
       if(e.code==='empty')continue;
-      if(e.code==='rate_limited'&&!/limit: ?0|free.?tier|quota/i.test(e.message))throw e;
       if(cfg.gModel===m)cfg.gModel='';continue;}}
+  if(rl.length&&rl.length===tries||(last&&last.code==='rate_limited')){
+    const daily=rl.length&&rl.every(e=>e.daily);
+    if(!daily&&round<2){const wait=Math.min(60,Math.max(8,...rl.map(e=>e.retry||0)));await waitSecs(wait,'Free-tier limit reached.');return geminiCallInner(prompt,{web,maxTokens,tier,meta},round+1);}
+    if(web){toast('Web search limit reached, answering without it.');setTimeout(()=>toast(''),4000);return geminiCallInner(prompt,{web:false,maxTokens,tier,meta},round);}
+    const x=new Error(daily?'You’ve used today’s free Gemini allowance. It resets around 5–6pm Brisbane time (midnight in California).':'Google’s free tier is busy for your key. Wait a minute and try again.');x.code='rate_limited_msg';throw x;}
   if(last&&last.code==='timeout'){last.message='Every Gemini model on your key was too slow just now. Open Settings and tap Test my key, then send me a screenshot.';}
   throw last||new Error('No Gemini model on your key could answer. Try again in a minute.');}
 async function geminiDiag(){const out=$('#sDiag');const key=$('#sGem').value.trim();if(!key){out.innerHTML='<div class="errbox">Paste your key first.</div>';return;}
@@ -92,6 +101,7 @@ function errMsg(e){if(!e)return'Something went wrong.';
   if(e.code==='bad_key')return'The API key was rejected. Check it in Settings.';
   if(e.code==='not_granted')return'Claude access wasn’t allowed for this page. Allow it, or add an API key in Settings.';
   if(e.code==='timeout'||e.code==='network')return e.message;
+  if(e.code==='rate_limited_msg')return e.message;
   if(e.code==='rate_limited')return'Hit the speed limit for your key. Wait a minute and try again.';
   return'Lookup failed: '+(e.message||String(e));}
 const errBox=e=>`<div class="errbox">${esc(errMsg(e))}${e&&(e.code==='nokey'||e.code==='bad_key')?' <button class="linkbtn" data-open-settings type="button">Open settings</button>':''}</div>`;
@@ -279,12 +289,17 @@ function chooseEngine(e){const my=++st.ver;st.engine=e;st.spec=null;st.sel=null;
   const res=$('#result');res.hidden=false;res.classList.remove('manual');const v=st.vehicle;
   $('#rTitle').textContent=v.vehicle;$('#rMarket').textContent=[e.label,v.series,v.market].filter(Boolean).join(' · ');
   $('#rIds').innerHTML=[v.vinStr?`VIN <code>${esc(v.vinStr)}</code>`:'',v.rego?`Rego <code>${esc(v.rego)}</code>`:''].filter(Boolean).join(' · ');
-  $('#rOverview').innerHTML=skel('Pulling engine data…');
+  $('#rOverview').innerHTML='';
   $('#specs').innerHTML=skel('Loading specifications…');$('#uncertain').textContent='';$('#fluids').innerHTML=skel('Loading…');$('#service').innerHTML='';$('#torque').innerHTML='';$('#issues').innerHTML=skel('Loading…');$('#ans').innerHTML='';
   $('#psq').value='';$('#abbrHint').textContent='';renderCats();
   st.s=normSpec(guessFromLabel(e));renderDiagram();renderDetail();renderLinks();
   $('#result').scrollIntoView({behavior:'smooth',block:'start'});
-  partSearch(null,CATS[0]);
+  $('#presults').innerHTML='<p class="muted">Search for a part above, or tap a category.</p>';
+  lazySpecs(my,e);
+}
+function lazySpecs(my,e){let started=false;const go=()=>{if(started||my!==st.ver)return;started=true;io.disconnect();loadSpecs(my,e);};
+  const io=new IntersectionObserver(es=>{if(es.some(x=>x.isIntersecting))go();},{rootMargin:'200px'});['#sec-diagram','#sec-specs','#sec-service','#sec-issues'].forEach(q=>io.observe($(q)));}
+function loadSpecs(my,e){
   ask(specPrompt(),{json:true,tier:'parts'}).then(r=>{if(my!==st.ver)return;st.spec=r;st.s=normSpec(Object.assign(guessFromLabel(e),r.engine||{}));renderSpec();renderDiagram();renderDetail();renderLinks();})
     .catch(err=>{if(my!==st.ver)return;$('#rOverview').innerHTML='';$('#specs').innerHTML=errBox(err);$('#fluids').innerHTML='';$('#issues').innerHTML='';});}
 
