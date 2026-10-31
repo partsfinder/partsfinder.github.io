@@ -48,7 +48,7 @@ async function geminiOnce(prompt,m,o={},ms){let think=!cfg.gNoThink;
   for(let attempt=0;attempt<2;attempt++){
     const r=await gfetch(`${GBASE}/models/${m}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':cfg.geminiKey},body:JSON.stringify(gBody(prompt,m,{...o,think}))},ms);
     const j=await r.json().catch(()=>({}));
-    if(r.ok){const c=j.candidates?.[0];if(o.meta){o.meta.sources=((c?.groundingMetadata?.groundingChunks)||[]).map(g=>g.web).filter(Boolean).map(w=>({uri:w.uri,title:w.title||w.domain||w.uri}));}const t=(c?.content?.parts||[]).filter(p=>p.text&&!p.thought).map(p=>p.text).join('');
+    if(r.ok){const c=j.candidates?.[0];if(o.meta){const gm=c?.groundingMetadata||{};o.meta.sources=(gm.groundingChunks||[]).map(g=>g.web).filter(Boolean).map(w=>({uri:w.uri,title:w.title||w.domain||w.uri}));o.meta.supported=(gm.groundingSupports||[]).map(x=>x.segment?.text||'').join(' \n ');}const t=(c?.content?.parts||[]).filter(p=>p.text&&!p.thought).map(p=>p.text).join('');
       if(!t){const x=new Error(c?.finishReason?`No answer (${c.finishReason}).`:(j.promptFeedback?.blockReason?`Blocked (${j.promptFeedback.blockReason}).`:'Empty answer.'));x.code='empty';throw x;}return t;}
     const msg=j?.error?.message||('HTTP '+r.status);
     if(r.status===400&&think&&/think/i.test(msg)){think=false;cfg.gNoThink=true;saveCfg();continue;}
@@ -331,26 +331,27 @@ async function partSearch(query,cat){if(!st.vehicle||st.vehicle.manual)return;co
   const el=$('#presults');const label=cat?cat[0]:`“${query}”`;
   if(st.pcache[key]){renderParts(st.pcache[key],label,key);return;}
   el.innerHTML=skel(`Searching the web for ${label} for ${vshort()}…`);
-  try{const hints=query?expandAbbr(query):[];const grounded=canVerify();const meta={};const r=normalizeItems(await ask(partsPrompt(query?(query+(hints.length?` (${hints.join('; ')})`:'')):null,cat?`${cat[0]}: ${cat[1]}`:null,grounded),{json:true,tier:grounded?'default':'parts',web:grounded,meta,maxTokens:12000}),grounded);r.sources=meta.sources||[];r.grounded=grounded;
+  try{const hints=query?expandAbbr(query):[];const grounded=canVerify();const meta={};const r=normalizeItems(await ask(partsPrompt(query?(query+(hints.length?` (${hints.join('; ')})`:'')):null,cat?`${cat[0]}: ${cat[1]}`:null,grounded),{json:true,tier:grounded?'default':'parts',web:grounded,meta,maxTokens:12000}),grounded,meta);r.sources=meta.sources||[];r.grounded=grounded;
     if(my!==st.ver)return;st.pcache[key]=r;r.label=label;renderParts(r,label,key);}
   catch(e){if(my!==st.ver)return;el.innerHTML=errBox(e);}}
 const BRAND_SCOPE={ryco:/filter/i,wesfil:/filter/i,sakura:/filter/i,permaseal:/gasket|seal|o.?ring/i,felpro:/gasket|seal|o.?ring/i,bendix:/brake|pad|shoe|rotor|disc|drum|caliper|fluid/i,protex:/brake|pad|shoe|rotor|disc|drum|caliper|cylinder|hose/i,dba:/brake|rotor|disc|pad/i,rda:/brake|rotor|disc|drum|pad/i,ngk:/spark|glow|plug|ignition|lead|coil|oxygen|o2|lambda|sensor/i,narva:/globe|bulb|lamp|light|fuse|relay|switch|horn|wir|led|beacon|flasher/i,projecta:/globe|bulb|lamp|light|fuse|relay|switch|horn|wir|led|batter|charger|jump/i,gates:/belt|hose|tensioner|idler|pulley|water pump|timing/i,dayco:/belt|hose|tensioner|idler|pulley|water pump|timing/i};
 function scopeOK(brand,p){const k=normN(brand).toLowerCase();const re=BRAND_SCOPE[k];if(!re)return true;return re.test(`${p.name} ${p.notes||''} ${JSON.stringify(p.specs||{})}`);}
-function normalizeItems(r,grounded){(r.items||[]).forEach(p=>{if(!p)return;p.v=p.v||{};
+function normalizeItems(r,grounded,meta){const sup=normN(meta&&meta.supported||'');const hasSup=!!sup;(r.items||[]).forEach(p=>{if(!p)return;p.v=p.v||{};
   const oem=(Array.isArray(p.oem)?p.oem:p.oem?[p.oem]:[]).map(o=>typeof o==='string'?{number:o,source:null}:o).filter(o=>o&&o.number);
   p.oem=oem.map(o=>o.number);
   p.crossRefs=(p.crossRefs||[]).filter(c=>c&&c.number&&scopeOK(c.brand,p));
-  if(grounded){oem.forEach(o=>{p.v[normN(o.number)]={status:/^https?:/.test(o.source||'')?'confirmed':'unconfirmed',source:o.source};});
-    p.crossRefs.forEach(c=>{p.v[normN(c.number)]={status:/^https?:/.test(c.source||'')?'confirmed':'unconfirmed',source:c.source};});
-    p.vdone=true;const st2=Object.values(p.v).map(z=>z.status),good=st2.filter(z=>z==='confirmed').length;p.confidence=!st2.length?'low':good===st2.length?'high':good?'medium':'low';}});
+  const judge=(num,src)=>{const n=normN(num);const url=/^https?:/.test(src||'');if(hasSup&&n.length>=4&&sup.includes(n))return'confirmed';return url?'claimed':'unconfirmed';};
+  if(grounded){oem.forEach(o=>{p.v[normN(o.number)]={status:judge(o.number,o.source),source:o.source};});
+    p.crossRefs.forEach(c=>{p.v[normN(c.number)]={status:judge(c.number,c.source),source:c.source};});
+    p.vdone=true;const st2=Object.values(p.v).map(z=>z.status),good=st2.filter(z=>z==='confirmed').length+st2.filter(z=>z==='claimed').length*0.5;p.confidence=!st2.length?'low':good===st2.length?'high':good?'medium':'low';}});
   return r;}
-function vCounts(items){const c={confirmed:0,corrected:0,unconfirmed:0,added:0};items.forEach(p=>Object.values(p.v||{}).forEach(z=>c[z.status]=(c[z.status]||0)+1));return c;}
+function vCounts(items){const c={confirmed:0,corrected:0,unconfirmed:0,added:0,claimed:0};items.forEach(p=>Object.values(p.v||{}).forEach(z=>c[z.status]=(c[z.status]||0)+1));return c;}
 function renderParts(r,label,key){const items=(r.items||[]).filter(Boolean);r.items=items;st.pitems=items;st.pres=r;st.pkey=key;const el=$('#presults');
   if(!items.length){el.innerHTML=`<p class="muted">Nothing found for ${esc(label)}. Try another wording or a category.</p>`;return;}
   const c=vCounts(items),done=items.every(p=>p.vdone);
   const vbar=!canVerify()?`<p class="warn">Numbers below are unverified AI suggestions. Add a Gemini key in Settings to check them against the web.</p>`
     :r.verifying?`<div class="vbar">${skel('Checking numbers against Google: catalogues and AU retailers…')}</div>`
-    :(c.confirmed+c.corrected+c.added+c.unconfirmed)?`<div class="vbar"><b>Web check:</b> <span class="vb ok">✓ ${c.confirmed+c.added} verified</span> <span class="vb fix">✎ ${c.corrected} corrected</span> <span class="vb unk">? ${c.unconfirmed} unverified</span>${!done?' <button class="linkbtn" data-act="verifyall" type="button">Check the rest</button>':''}${c.unconfirmed?` <button class="linkbtn" data-act="togunv" type="button">${st.showUnv?'Hide':'Show'} ${c.unconfirmed} unverified</button>`:''}${r.vsummary?`<div class="small muted">${esc(r.vsummary)}</div>`:''}</div>`
+    :(c.confirmed+c.corrected+c.added+c.unconfirmed+c.claimed)?`<div class="vbar"><b>Web check:</b> <span class="vb ok">✓ ${c.confirmed+c.added} verified</span> <span class="vb fix">⚠ ${c.claimed} check source</span>${c.corrected?` <span class="vb fix">✎ ${c.corrected} corrected</span>`:''} <span class="vb unk">? ${c.unconfirmed} unverified</span>${!done?' <button class="linkbtn" data-act="verifyall" type="button">Check the rest</button>':''}${c.unconfirmed?` <button class="linkbtn" data-act="togunv" type="button">${st.showUnv?'Hide':'Show'} ${c.unconfirmed} unverified</button>`:''}${r.vsummary?`<div class="small muted">${esc(r.vsummary)}</div>`:''}</div>`
     :`<div class="vbar"><button class="btn sm primary" data-act="verifyall" type="button">✓ Verify all numbers with Google</button> <span class="small muted">Checks each number against catalogues and AU retailers</span></div>`;
   el.innerHTML=`<div class="rhead"><div><b>${esc(label)}</b> <span class="muted small">${items.length} parts</span>${r.interpreted?`<div class="small muted">${esc(r.interpreted)}</div>`:''}</div><button class="btn sm" data-act="copyall" type="button">Copy all</button></div>
 ${vbar}${r.tips?`<p class="warn">ℹ ${esc(r.tips)}</p>`:''}${items.map(partHTML).join('')}
@@ -392,8 +393,19 @@ function numBadge(p,num){const v=vstate(p,num);if(!v)return'';const src=v.source
   if(v.status==='confirmed')return `<span class="vb ok" title="Confirmed by web search">✓ verified</span>${src}`;
   if(v.status==='corrected')return `<span class="vb fix">✎ corrected to <code>${esc(v.correct)}</code></span>${src}`;
   if(v.status==='added')return `<span class="vb ok">✓ found online</span>${src}`;
+  if(v.status==='claimed')return `<span class="vb fix" title="The AI cited a page, but the number wasn't in Google's results. Open the source to check.">⚠ check source</span>${src}`;
   return `<span class="vb unk" title="No web evidence found">? unverified, may not exist</span>`;}
 function photoQuery(p){const o=(p.oem||[])[0];const c=(p.crossRefs||[]).find(c=>c&&c.number);return o?`${o} ${p.name}`:c?`${c.brand} ${c.number}`:`${vshort()} ${p.name}`;}
+const CATALOGS=[[/filter/i,[['Ryco filter finder','https://www.ryco.com.au/'],['Wesfil','https://www.wesfil.com.au/']]],
+[/globe|bulb|lamp|light|fuse|relay|led|hid|drl/i,[['Narva vehicle lookup','https://www.narva.com.au/']]],
+[/spark|glow|plug|ignition|coil|oxygen|o2|lambda/i,[['NGK part finder','https://ngk.com.au/']]],
+[/brake|pad|shoe|rotor|disc|drum|caliper/i,[['Bendix pad finder','https://www.bendix.com.au/'],['Protex','https://www.protex.com.au/']]],
+[/batter/i,[['Century battery finder','https://www.centurybatteries.com.au/']]],
+[/wiper|blade|refill/i,[['Bosch wiper finder','https://www.bosch.com.au/']]]];
+function catalogLinks(p){const t=`${p.name} ${JSON.stringify(p.specs||{})}`;const out=[];CATALOGS.forEach(([re,ls])=>{if(re.test(t))ls.forEach(l=>out.push(l));});
+  out.push(['Repco (enter your rego)','https://www.repco.com.au/']);
+  const v=st.vehicle?.vinStr;out.push([v?'Genuine catalogue (your VIN)':'Genuine catalogue (Partsouq)',v?`https://partsouq.com/en/search/all?q=${v}`:'https://partsouq.com/']);
+  return `<div class="cats-official"><span class="small muted">Confirm in the official catalogue:</span> ${out.map(([n,u])=>lnk(u,n+' ↗')).join('')}</div>`;}
 function hidden(p,n){const v=vstate(p,n);return!st.showUnv&&v&&v.status==='unconfirmed';}
 function partHTML(p,i){const oem=(Array.isArray(p.oem)?p.oem:p.oem?[p.oem]:[]).filter(Boolean);p.oem=oem;const refs=(p.crossRefs||[]).filter(c=>c&&c.number).sort((x,y)=>isPref(y.brand)-isPref(x.brand));
   const num=n=>{const v=vstate(p,n);return v&&v.status==='corrected'?`<code class="struck">${esc(n)}</code>`:v&&v.status==='unconfirmed'?`<code class="dim">${esc(n)}</code>`:`<code>${esc(n)}</code>`;};
@@ -402,7 +414,7 @@ function partHTML(p,i){const oem=(Array.isArray(p.oem)?p.oem:p.oem?[p.oem]:[]).f
 <div class="nums"><div class="numrow"><span class="nlab">OEM</span>${oem.filter(n=>!hidden(p,n)).length?oem.filter(n=>!hidden(p,n)).map(n=>num(n)+numBadge(p,n)).join(' '):'<span class="muted small">no verified genuine number found, check by VIN</span>'}${oem.filter(n=>!hidden(p,n)).length?`<span class="plinks">${lnk(`https://partsouq.com/en/search/all?q=${qv(oem.filter(n=>!hidden(p,n))[0])}`,'Partsouq')}${lnk(ebay(oem[0]),'eBay')}<button class="linkbtn" data-act="xref" data-n="${esc(oem[0])}" type="button">Cross-ref</button></span>`:''}</div>
 ${refs.filter(c=>!hidden(p,c.number)).map(c=>`<div class="numrow${isPref(c.brand)?' pref':''}"><span class="nlab">${esc(c.brand)}${isPref(c.brand)?`<span class="instore">${esc(cfg.store||'Repco')}</span>`:''}</span>${num(c.number)}${numBadge(p,c.number)}${c.store?`<span class="small muted">${esc(c.store)}</span>`:''}<span class="plinks">${storeLinks(vstate(p,c.number)?.status==='corrected'?vstate(p,c.number).correct:c.number,true)}</span>${c.notes?`<div class="small muted full">${esc(c.notes)}</div>`:''}</div>`).join('')}</div>
 ${p.notes?`<div class="pnote">${esc(p.notes)}</div>`:''}
-<div class="plinks">Search stores: ${storeLinks(`${vshort()} ${p.position||''} ${p.name}`.replace(/\s+/g,' '))}</div>
+${catalogLinks(p)}<div class="plinks">Search stores: ${storeLinks(`${vshort()} ${p.position||''} ${p.name}`.replace(/\s+/g,' '))}</div>
 <div class="pact">${canVerify()&&!p.vdone?`<button class="btn sm" data-act="verify1" type="button">Verify with Google</button>`:''}${liveOn()?`<button class="btn sm" data-act="live" type="button">Find live listings</button>`:''}<button class="btn sm ghost" data-act="copy" type="button">Copy</button></div><div class="pout"></div></div>`;}
 const canVerify=()=>['gemini','api','groq'].includes(aiMode());
 function verifyPrompt(list){return `You are checking a car parts list for accuracy using web search.
