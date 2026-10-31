@@ -141,10 +141,18 @@ $('#vin').addEventListener('input',e=>{e.target.value=e.target.value.toUpperCase
 const REGO={QLD:'https://www.service.transport.qld.gov.au/checkrego/public/Welcome.xhtml',NSW:'https://www.service.nsw.gov.au/transaction/check-a-vehicle-registration',VIC:'https://www.vicroads.vic.gov.au/registration',WA:'https://www.transport.wa.gov.au',SA:'https://www.sa.gov.au/topics/driving-and-transport/registration',TAS:'https://www.ppsr.gov.au/vehicle-registration-number',ACT:'https://www.ppsr.gov.au/vehicle-registration-number',NT:'https://www.ppsr.gov.au/vehicle-registration-number'};
 function findVin(o){if(typeof o==='string')return /^[A-HJ-NPR-Z0-9]{17}$/.test(o)?o:'';if(o&&typeof o==='object'){for(const v of Object.values(o)){const r=findVin(v);if(r)return r;}}return'';}
 function regoManual(state,plate,why){const out=$('#regoOut');
-  out.innerHTML=`${why?`<div class="errbox">${esc(why)}</div>`:''}<p class="small">${cfg.regcheck?'':'Turning a plate into a VIN automatically needs a paid vehicle-data service; add a RegCheck username in Settings to switch it on. '}You can also open the free ${state} check, then paste the VIN here. The VIN is also on your rego papers, at the base of the windscreen and on the driver-side door pillar.</p>
-<div class="row"><a class="btn sm" href="${REGO[state]}" target="_blank" rel="noopener">Open ${state} rego check ↗</a></div>
-<div class="row" style="margin-top:8px"><input id="regoVin" type="text" placeholder="Paste VIN"><button class="btn" id="regoVinGo" type="button">Use VIN</button></div>`;
-  $('#regoVinGo').onclick=()=>{const v=$('#regoVin').value.replace(/\s/g,'').toUpperCase();if(isVin(v))runSearch(v,'',{rego:`${plate} ${state}`});else $('#regoVin').focus();};}
+  out.innerHTML=`${why?`<div class="errbox">${esc(why)}</div>`:''}
+<ol class="steps">
+<li><b>Open the free ${state} rego check.</b> Your plate <code>${esc(plate)}</code> is copied, so just paste it in.<div class="row" style="margin-top:6px"><a class="btn sm primary" id="regoOpen" href="${REGO[state]}" target="_blank" rel="noopener">Open ${state} rego check \u2197</a></div></li>
+<li><b>Copy the VIN</b> from the result, or the year, make and model if it doesn't show the VIN.</li>
+<li><b>Paste it here.</b><div class="row" style="margin-top:6px"><input id="regoVin" type="text" placeholder="VIN, or e.g. 2022 Haval H6 Ultra"><button class="btn" id="regoPaste" type="button">Paste</button><button class="btn primary" id="regoVinGo" type="button">Go</button></div></li>
+</ol>
+<p class="small muted">The VIN is also printed on your rego papers, at the base of the windscreen and on the driver-side door pillar.</p>`;
+  const go=()=>{const v=$('#regoVin').value.trim();if(!v){$('#regoVin').focus();return;}const vv=v.replace(/\s/g,'').toUpperCase();
+    if(isVin(vv))runSearch(vv,'',{rego:`${plate} ${state}`});else runSearch(v,'',{rego:`${plate} ${state}`});};
+  $('#regoVinGo').onclick=go;$('#regoVin').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();go();}};
+  $('#regoPaste').onclick=async()=>{try{const t=(await navigator.clipboard.readText()).trim();if(t){$('#regoVin').value=t;}}catch(e){$('#regoVin').focus();$('#regoPaste').textContent='Long-press to paste';}};
+  try{navigator.clipboard.writeText(plate).catch(()=>{});}catch(e){}}
 $('#fRego').addEventListener('submit',async ev=>{ev.preventDefault();const state=$('#state').value,plate=$('#plate').value.replace(/\s/g,'').toUpperCase();if(!plate)return;
   if(!cfg.regcheck){regoManual(state,plate);return;}
   $('#regoOut').innerHTML=skel(`Looking up ${plate} (${state})…`);
@@ -155,7 +163,7 @@ $('#fRego').addEventListener('submit',async ev=>{ev.preventDefault();const state
     if(!desc&&!vin)throw new Error(r.ok?'No vehicle found for that plate.':'The service answered '+r.status+'.');
     $('#regoOut').innerHTML=`<p class="small">Found <b>${esc(desc||'vehicle')}</b>${vin?` · VIN <code>${esc(vin)}</code>`:''}</p>`;
     runSearch(vin?`${desc} (VIN ${vin})`:desc,'',{rego:`${plate} ${state}`,vin});}
-  catch(e){regoManual(state,plate,`Automatic lookup didn’t work (${e.message==='Failed to fetch'?'the service blocked a browser request':e.message}).`);}});
+  catch(e){regoManual(state,plate,'Automatic lookup didn’t work, so here’s the free way.');}});
 
 /* ---------- part-number cross reference ---------- */
 $('#fPn').addEventListener('submit',ev=>{ev.preventDefault();const n=$('#pn').value.trim();if(n)xref(n,$('#pnVeh').value.trim(),$('#pnOut'));});

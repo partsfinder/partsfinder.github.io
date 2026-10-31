@@ -158,9 +158,10 @@
       <select id="sModel" style="width:100%"><option value="claude-sonnet-5-5">Claude Sonnet 5.5 (recommended)</option><option value="claude-opus-5-5">Claude Opus 5.5 (most thorough, slower)</option><option value="claude-haiku-5-5">Claude Haiku 5.5 (fastest, cheapest)</option></select>
     </div>
     <label class="check"><input id="sLive" type="checkbox"> Live retailer search: checks real Repco, Supercheap, Burson and other listings on the web and verifies cross-references (slower; free on Gemini up to 5,000 searches a month)</label>
-    <label class="lab" for="sReg" style="margin-top:12px">RegCheck username (optional)</label>
-    <input id="sReg" type="text" placeholder="carregistrationapi.com.au username" style="width:100%">
-    <p class="small muted">Turns a rego plate into a VIN automatically. It's a paid third-party service and may block browser requests. Without it, the Rego tab links to your state's free check.</p>
+    <details class="more"><summary>Advanced: automatic rego lookup (paid service, optional)</summary>
+      <input id="sReg" type="text" placeholder="RegCheck username" style="width:100%;margin-top:8px">
+      <p class="small muted">Only needed if you want plates turned into VINs with no extra step. The free Rego tab works without it.</p>
+    </details>
     <div class="row" style="margin-top:12px"><button class="btn primary" id="sSave" type="button">Save</button><button class="btn ghost" id="sClear" type="button">Clear all</button></div>
   </div>
 </div>
