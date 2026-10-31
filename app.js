@@ -154,15 +154,19 @@ const qv=s=>encodeURIComponent(s);
 const gsite=(q,d)=>`https://www.google.com/search?q=${qv(q+' site:'+d)}`;
 const ebay=q=>`https://www.ebay.com.au/sch/i.html?_nkw=${qv(q)}`;
 const lnk=(u,t)=>`<a href="${esc(u)}" target="_blank" rel="noopener">${t}</a>`;
-function storeLinks(q,few){const pref=(cfg.store||'Repco').toLowerCase();const ord=[...STORES].sort((x,y)=>(y[0].toLowerCase()===pref)-(x[0].toLowerCase()===pref));const s=few?ord.slice(0,3):ord;return s.map(([n,d])=>lnk(gsite(q,d),n)).join('')+lnk(ebay(q),'eBay');}
+const STORE_SEARCH={Repco:q=>`https://www.repco.com.au/search?text=${qv(q)}`};
+function storeLinks(q,few){const pref=(cfg.store||'Repco').toLowerCase();const ord=[...STORES].sort((x,y)=>(y[0].toLowerCase()===pref)-(x[0].toLowerCase()===pref));const s=few?ord.slice(0,3):ord;return s.map(([n,d])=>lnk(STORE_SEARCH[n]?STORE_SEARCH[n](q):gsite(q,d),n)).join('')+lnk(ebay(q),'eBay');}
 const vshort=()=>{const v=st.vehicle||{};return[v.year,v.make,v.model].filter(Boolean).join(' ')||v.vehicle||'';};
 
-const DEFAULT_BRANDS='Ryco, Repco, ProSelect, Protex, Bendix, SAAS, Permaseal';
+const DEFAULT_BRANDS='Ryco, Repco, ProSelect, Protex, Bendix, SAAS, Permaseal, Payen, ACL Engine Parts';
+if(cfg.brands==='Ryco, Repco, ProSelect, Protex, Bendix, SAAS, Permaseal')delete cfg.brands;
 const prefBrands=()=>(cfg.brands||DEFAULT_BRANDS).split(/[,\n]/).map(x=>x.trim()).filter(Boolean);
 const isPref=b=>{const n=normN(b);return!!n&&prefBrands().some(x=>{const y=normN(x);return n===y||n.startsWith(y);});};
 function brandRule(){const b=prefBrands();return b.length?`PRIORITY BRANDS: the customer shops at ${cfg.store||'Repco'}, which stocks ${b.join(', ')}. When one of these brands genuinely makes this exact part AND you have a real number for it, list it first with "store":"${cfg.store||'Repco'}". Never list a priority brand just to fill the slot, and never for a product type it doesn't make.`:'';}
 /* ---------- number-format rules: things AI can't fake ---------- */
-const DEFAULT_RULES='Repco, Permaseal: rocker cover gasket|valve cover gasket|cam cover gasket = RC';
+const DEFAULT_RULES='Repco, Permaseal: rocker cover gasket|valve cover gasket|cam cover gasket|head cover gasket|rocket cover gasket = RC\nPermaseal: manifold gasket = MS, MG, MP, EM\nPermaseal: timing cover = TCS\nPayen: valve cover gasket|rocker cover gasket = JM, JP\nACL: valve cover gasket|rocker cover gasket = JN';
+const OLD_RULES=['Repco, Permaseal: gasket = RC','Repco, Permaseal: rocker cover gasket|valve cover gasket|cam cover gasket = RC'];
+if(OLD_RULES.includes(cfg.rules)){delete cfg.rules;}
 function parseRules(){return(cfg.rules??DEFAULT_RULES).split('\n').map(l=>l.trim()).filter(l=>l&&l.includes('=')).map(l=>{const[lhs,rhs]=l.split('=');const[br,kw]=lhs.split(':');
   return{brands:(br||'').split(',').map(x=>normN(x)).filter(Boolean),kw:(kw||'').split('|').map(x=>x.trim().toLowerCase()).filter(Boolean),pre:(rhs||'').split(',').map(x=>normN(x)).filter(Boolean)};}).filter(r=>r.brands.length&&r.pre.length);}
 const OEM_FAMILY={nissan:[[/rocker|valve cover|cam cover/i,/gasket/i,['13270']],[/oil filter/i,null,['15208']],[/air filter|air cleaner/i,null,['16546']],[/spark plug/i,null,['22401']],[/fuel filter/i,null,['16400','16403','16901']]],
@@ -356,7 +360,7 @@ async function partSearch(query,cat){if(!st.vehicle||st.vehicle.manual)return;co
   try{const hints=query?expandAbbr(query):[];const grounded=canVerify();const meta={};const r=normalizeItems(await ask(partsPrompt(query?(query+(hints.length?` (${hints.join('; ')})`:'')):null,cat?`${cat[0]}: ${cat[1]}`:null,grounded),{json:true,tier:grounded?'default':'parts',web:grounded,meta,maxTokens:12000}),grounded,meta);r.sources=meta.sources||[];r.grounded=grounded;
     if(my!==st.ver)return;st.pcache[key]=r;r.label=label;renderParts(r,label,key);}
   catch(e){if(my!==st.ver)return;el.innerHTML=errBox(e);}}
-const BRAND_SCOPE={ryco:/filter/i,wesfil:/filter/i,sakura:/filter/i,permaseal:/gasket|seal|o.?ring/i,felpro:/gasket|seal|o.?ring/i,bendix:/brake|pad|shoe|rotor|disc|drum|caliper|fluid/i,protex:/brake|pad|shoe|rotor|disc|drum|caliper|cylinder|hose/i,dba:/brake|rotor|disc|pad/i,rda:/brake|rotor|disc|drum|pad/i,ngk:/spark|glow|plug|ignition|lead|coil|oxygen|o2|lambda|sensor/i,narva:/\b(globes?|bulbs?|lamps?|lights?|fuses?|relays?|switch(es)?|horns?|wiring|led|beacons?|flashers?)\b/i,projecta:/\b(globes?|bulbs?|lamps?|lights?|fuses?|relays?|switch(es)?|horns?|wiring|led|batter(y|ies)|chargers?|jump)\b/i,gates:/belt|hose|tensioner|idler|pulley|water pump|timing/i,dayco:/belt|hose|tensioner|idler|pulley|water pump|timing/i};
+const BRAND_SCOPE={payen:/gasket|seal|washer/i,acl:/gasket|seal|bearing|ring|piston|bush/i,aclengineparts:/gasket|seal|bearing|ring|piston|bush/i,ryco:/filter/i,wesfil:/filter/i,sakura:/filter/i,permaseal:/gasket|seal|o.?ring/i,felpro:/gasket|seal|o.?ring/i,bendix:/brake|pad|shoe|rotor|disc|drum|caliper|fluid/i,protex:/brake|pad|shoe|rotor|disc|drum|caliper|cylinder|hose/i,dba:/brake|rotor|disc|pad/i,rda:/brake|rotor|disc|drum|pad/i,ngk:/spark|glow|plug|ignition|lead|coil|oxygen|o2|lambda|sensor/i,narva:/\b(globes?|bulbs?|lamps?|lights?|fuses?|relays?|switch(es)?|horns?|wiring|led|beacons?|flashers?)\b/i,projecta:/\b(globes?|bulbs?|lamps?|lights?|fuses?|relays?|switch(es)?|horns?|wiring|led|batter(y|ies)|chargers?|jump)\b/i,gates:/belt|hose|tensioner|idler|pulley|water pump|timing/i,dayco:/belt|hose|tensioner|idler|pulley|water pump|timing/i};
 function scopeOK(brand,p){const k=normN(brand).toLowerCase();const re=BRAND_SCOPE[k];if(!re)return true;return re.test(p.name||'');}
 function normalizeItems(r,grounded,meta){const sup=normN(meta&&meta.supported||'');const hasSup=!!sup;(r.items||[]).forEach(p=>{if(!p)return;p.v=p.v||{};
   const oem=(Array.isArray(p.oem)?p.oem:p.oem?[p.oem]:[]).map(o=>typeof o==='string'?{number:o,source:null}:o).filter(o=>o&&o.number);
@@ -430,7 +434,7 @@ const CATALOGS=[[/filter/i,[['Ryco filter finder','https://www.ryco.com.au/'],['
 [/\bbatter(y|ies)\b/i,[['Century battery finder','https://www.centurybatteries.com.au/']]],
 [/\b(wipers?|wiper blades?|refills?)\b/i,[['Bosch wiper finder','https://www.bosch.com.au/']]]];
 function catalogLinks(p){const t=`${p.name} ${JSON.stringify(p.specs||{})}`;const out=[];CATALOGS.forEach(([re,ls])=>{if(re.test(t))ls.forEach(l=>out.push(l));});
-  out.push(['Repco (enter your rego)','https://www.repco.com.au/']);
+  out.push(['Repco (enter your rego)',`https://www.repco.com.au/search?text=${qv(p.name)}`]);
   const v=st.vehicle?.vinStr;out.push([v?'Genuine catalogue (your VIN)':'Genuine catalogue (Partsouq)',v?`https://partsouq.com/en/search/all?q=${v}`:'https://partsouq.com/']);
   return `<div class="cats-official"><span class="small muted">Confirm in the official catalogue:</span> ${out.map(([n,u])=>lnk(u,n+' ↗')).join('')}</div>`;}
 function hidden(p,n){const v=vstate(p,n);return!st.showUnv&&v&&v.status==='unconfirmed';}
