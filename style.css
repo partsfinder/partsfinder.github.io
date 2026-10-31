@@ -261,3 +261,4 @@ textarea{background:#0b1017;border:1px solid #2b3542;color:var(--text);border-ra
 .dg.broken img{display:none}.dg.broken figcaption::before{content:"Image no longer available from the source";display:block;width:100%;color:var(--muted);font-size:13px}
 .dgadd{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
 .dgadd label.btn{cursor:pointer}
+.smc{margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#0e141b}
