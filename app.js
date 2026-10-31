@@ -164,8 +164,8 @@ const prefBrands=()=>(cfg.brands||DEFAULT_BRANDS).split(/[,\n]/).map(x=>x.trim()
 const isPref=b=>{const n=normN(b);return!!n&&prefBrands().some(x=>{const y=normN(x);return n===y||n.startsWith(y);});};
 function brandRule(){const b=prefBrands();return b.length?`PRIORITY BRANDS: the customer shops at ${cfg.store||'Repco'}, which stocks ${b.join(', ')}. When one of these brands genuinely makes this exact part AND you have a real number for it, list it first with "store":"${cfg.store||'Repco'}". Never list a priority brand just to fill the slot, and never for a product type it doesn't make.`:'';}
 /* ---------- number-format rules: things AI can't fake ---------- */
-const DEFAULT_RULES='Repco, Permaseal: rocker cover gasket|valve cover gasket|cam cover gasket|head cover gasket|rocket cover gasket = RC\nPermaseal: manifold gasket = MS, MG, MP, EM\nPermaseal: timing cover = TCS\nPayen: valve cover gasket|rocker cover gasket = JM, JP\nACL: valve cover gasket|rocker cover gasket = JN';
-const OLD_RULES=['Repco, Permaseal: gasket = RC','Repco, Permaseal: rocker cover gasket|valve cover gasket|cam cover gasket = RC'];
+const DEFAULT_RULES='Repco, Permaseal: rocker cover gasket|valve cover gasket|cam cover gasket|head cover gasket|rocket cover gasket = RC\nPermaseal: manifold gasket = MS, MG, MP, EM\nPermaseal: timing cover = TCS\nPayen: valve cover gasket|rocker cover gasket = JM, JP\nACL: valve cover gasket|rocker cover gasket = JN\nRepco: oil filter = ROF\nRepco: air filter = RAF\nRepco: cabin filter|cabin air filter|pollen filter = RCF\nRepco: fuel filter|fuel pre-filter|fuel prefilter = RDF, RDK\nRepco: filter service kit|filter kit = RFSK\nRepco: wiper blade = RCB\nRyco: oil filter|fuel filter = Z, R\nRyco: service kit|filter kit = RSK\nBendix: brake pad = DB\nDBA, Disc Brake Australia: caliper = DBAC\nDBA, Disc Brake Australia: rotor|disc = DBA\nOEX: water pump = WP\nOEX: alternator = HXA\nOEX: starter = HXS\nOEX: speed sensor|abs sensor = OSS';
+const OLD_RULES=['Repco, Permaseal: gasket = RC','Repco, Permaseal: rocker cover gasket|valve cover gasket|cam cover gasket = RC','Repco, Permaseal: rocker cover gasket|valve cover gasket|cam cover gasket|head cover gasket|rocket cover gasket = RC\nPermaseal: manifold gasket = MS, MG, MP, EM\nPermaseal: timing cover = TCS\nPayen: valve cover gasket|rocker cover gasket = JM, JP\nACL: valve cover gasket|rocker cover gasket = JN'];
 if(OLD_RULES.includes(cfg.rules)){delete cfg.rules;}
 function parseRules(){return(cfg.rules??DEFAULT_RULES).split('\n').map(l=>l.trim()).filter(l=>l&&l.includes('=')).map(l=>{const[lhs,rhs]=l.split('=');const[br,kw]=lhs.split(':');
   return{brands:(br||'').split(',').map(x=>normN(x)).filter(Boolean),kw:(kw||'').split('|').map(x=>x.trim().toLowerCase()).filter(Boolean),pre:(rhs||'').split(',').map(x=>normN(x)).filter(Boolean)};}).filter(r=>r.brands.length&&r.pre.length);}
@@ -179,9 +179,12 @@ function oemOK(p,num){const k=makeKey();if(!k)return true;const n=normN(num);
   return true;}
 const looksFake=num=>{const n=normN(num);return n.length<4||/(000|001)$/.test(n)&&!/^\d{5}[A-Z0-9]{5}$/.test(n)||/(XXX|ABC|123456|EXAMPLE|SAMPLE)/.test(n);};
 function ruleWhy(p,brand,num){const b=normN(brand),n=normN(num),name=(p.name||'').toLowerCase();
-  for(const r of parseRules()){const bm=!b||r.brands.some(x=>b===x||b.startsWith(x)),km=!r.kw.length||r.kw.some(k=>name.includes(k)),pm=r.pre.some(x=>n.startsWith(x));
-    if(b&&bm&&km&&!pm)return `${brand} ${r.kw[0]||'parts'} numbers start with ${r.pre.join(' or ')}`;
-    if(bm&&pm&&!km&&r.kw.length)return `${r.pre.join('/')} numbers are ${r.kw[0]}s, not ${p.name||'this part'}`;}
+  const rs=parseRules().filter(r=>!b?false:r.brands.some(x=>b===x||b.startsWith(x)));const rsAny=b?rs:parseRules();
+  const km=r=>!r.kw.length||r.kw.some(k=>name.includes(k)),pm=r=>r.pre.some(x=>n.startsWith(x));
+  if(rsAny.some(r=>km(r)&&pm(r)))return null;
+  const fwd=rs.find(r=>r.kw.length&&km(r)&&!pm(r));if(fwd)return `${brand} ${fwd.kw[0]} numbers start with ${fwd.pre.join(' or ')}`;
+  const rev=rsAny.filter(r=>r.kw.length&&pm(r)&&!km(r)).sort((x,y)=>Math.max(...y.pre.map(z=>z.length))-Math.max(...x.pre.map(z=>z.length)))[0];
+  if(rev)return `${rev.pre.join('/')} numbers are ${rev.kw[0]}s, not ${p.name||'this part'}`;
   return null;}
 const ruleOK=(p,b,n)=>!ruleWhy(p,b,n);
 function ruleText(){const rs=(cfg.rules??DEFAULT_RULES).split('\n').filter(l=>l.includes('='));return rs.length?`NUMBER FORMAT RULES (each prefix is reserved for that part type and those parts use that prefix; numbers that break these are rejected): ${rs.join('; ')}. For example RC numbers are rocker/valve cover gaskets, never head gaskets.`:'';}
@@ -218,6 +221,7 @@ For every part give:
 - "oem": genuine part numbers as an array of {"number":"","source":"URL or null"}.
 - "specs": the details a counter person checks, as key-value pairs, ONLY values you saw in a source or that are standard for this exact part (never estimate dimensions or bolt counts). E.g. thread size and pitch, length, diameter, hole size, globe type/base/wattage/voltage, fuse rating/type/position, wiper length in mm and inches plus connector, capacity, CCA, viscosity, material, dimensions.
 - "crossRefs": aftermarket equivalents sold in Australia, as {"brand","number","store":"e.g. Repco / Burson / Supercheap","source":"URL or null","notes"}.
+${repcoPromptLine()}
 ${ruleText()}
 Genuine numbers follow the maker's real format (e.g. Nissan and Toyota use 5 digits + 5 characters, and each part type has its own family, like Nissan rocker cover gaskets 13270-xxxxx). Never write placeholder-looking numbers such as 100-001 or ABC-001.
 BRAND RULES: only list a brand for products that brand actually makes. Ryco and Wesfil = filters only. Permaseal and Felpro = gaskets and seals. Bendix, Protex, DBA and RDA = brakes. NGK and Denso = spark plugs, glow plugs, ignition and oxygen sensors. Narva, Projecta, Philips and Osram = globes, fuses and electrical. Gates and Dayco = belts, hoses, tensioners. If no listed brand makes this part, give whichever real brand does, or none.
@@ -336,7 +340,7 @@ function chooseEngine(e){const my=++st.ver;st.engine=e;st.spec=null;st.sel=null;
   $('#rIds').innerHTML=[v.vinStr?`VIN <code>${esc(v.vinStr)}</code>`:'',v.rego?`Rego <code>${esc(v.rego)}</code>`:''].filter(Boolean).join(' · ');
   $('#rOverview').innerHTML='';
   $('#specs').innerHTML=skel('Loading specifications…');$('#uncertain').textContent='';$('#fluids').innerHTML=skel('Loading…');$('#service').innerHTML='';$('#torque').innerHTML='';$('#issues').innerHTML=skel('Loading…');$('#ans').innerHTML='';
-  $('#psq').value='';$('#abbrHint').textContent='';renderCats();
+  $('#psq').value='';$('#abbrHint').textContent='';renderCats();renderRepcoPanel();
   st.s=normSpec(guessFromLabel(e));renderDiagram();renderDetail();renderLinks();
   $('#result').scrollIntoView({behavior:'smooth',block:'start'});
   $('#presults').innerHTML='<p class="muted">Search for a part above, or tap a category.</p>';
@@ -357,10 +361,10 @@ async function partSearch(query,cat){if(!st.vehicle||st.vehicle.manual)return;co
   const el=$('#presults');const label=cat?cat[0]:`“${query}”`;
   if(st.pcache[key]){renderParts(st.pcache[key],label,key);return;}
   el.innerHTML=skel(`Searching the web for ${label} for ${vshort()}…`);
-  try{const hints=query?expandAbbr(query):[];const grounded=canVerify();const meta={};const r=normalizeItems(await ask(partsPrompt(query?(query+(hints.length?` (${hints.join('; ')})`:'')):null,cat?`${cat[0]}: ${cat[1]}`:null,grounded),{json:true,tier:grounded?'default':'parts',web:grounded,meta,maxTokens:12000}),grounded,meta);r.sources=meta.sources||[];r.grounded=grounded;
+  try{const hints=query?expandAbbr(query):[];const grounded=canVerify();const meta={};const r=normalizeItems(await ask(partsPrompt(query?(query+(hints.length?` (${hints.join('; ')})`:'')):null,cat?`${cat[0]}: ${cat[1]}`:null,grounded),{json:true,tier:grounded?'default':'parts',web:grounded,meta,maxTokens:12000}),grounded,meta);attachRepco(r);r.sources=meta.sources||[];r.grounded=grounded;
     if(my!==st.ver)return;st.pcache[key]=r;r.label=label;renderParts(r,label,key);}
   catch(e){if(my!==st.ver)return;el.innerHTML=errBox(e);}}
-const BRAND_SCOPE={payen:/gasket|seal|washer/i,acl:/gasket|seal|bearing|ring|piston|bush/i,aclengineparts:/gasket|seal|bearing|ring|piston|bush/i,ryco:/filter/i,wesfil:/filter/i,sakura:/filter/i,permaseal:/gasket|seal|o.?ring/i,felpro:/gasket|seal|o.?ring/i,bendix:/brake|pad|shoe|rotor|disc|drum|caliper|fluid/i,protex:/brake|pad|shoe|rotor|disc|drum|caliper|cylinder|hose/i,dba:/brake|rotor|disc|pad/i,rda:/brake|rotor|disc|drum|pad/i,ngk:/spark|glow|plug|ignition|lead|coil|oxygen|o2|lambda|sensor/i,narva:/\b(globes?|bulbs?|lamps?|lights?|fuses?|relays?|switch(es)?|horns?|wiring|led|beacons?|flashers?)\b/i,projecta:/\b(globes?|bulbs?|lamps?|lights?|fuses?|relays?|switch(es)?|horns?|wiring|led|batter(y|ies)|chargers?|jump)\b/i,gates:/belt|hose|tensioner|idler|pulley|water pump|timing/i,dayco:/belt|hose|tensioner|idler|pulley|water pump|timing/i};
+const BRAND_SCOPE={trico:/wiper|blade|refill/i,goss:/sensor|switch|valve|pump|regulator|solenoid/i,drivetech4x4:/bearing|shock|seal|suspension|hub|bush|kit/i,clutchindustries:/clutch|flywheel|slave|master/i,payen:/gasket|seal|washer/i,acl:/gasket|seal|bearing|ring|piston|bush/i,aclengineparts:/gasket|seal|bearing|ring|piston|bush/i,ryco:/filter/i,wesfil:/filter/i,sakura:/filter/i,permaseal:/gasket|seal|o.?ring/i,felpro:/gasket|seal|o.?ring/i,bendix:/brake|pad|shoe|rotor|disc|drum|caliper|fluid/i,protex:/brake|pad|shoe|rotor|disc|drum|caliper|cylinder|hose/i,dba:/brake|rotor|disc|pad/i,rda:/brake|rotor|disc|drum|pad/i,ngk:/spark|glow|plug|ignition|lead|coil|oxygen|o2|lambda|sensor/i,narva:/\b(globes?|bulbs?|lamps?|lights?|fuses?|relays?|switch(es)?|horns?|wiring|led|beacons?|flashers?)\b/i,projecta:/\b(globes?|bulbs?|lamps?|lights?|fuses?|relays?|switch(es)?|horns?|wiring|led|batter(y|ies)|chargers?|jump)\b/i,gates:/belt|hose|tensioner|idler|pulley|water pump|timing/i,dayco:/belt|hose|tensioner|idler|pulley|water pump|timing/i};
 function scopeOK(brand,p){const k=normN(brand).toLowerCase();const re=BRAND_SCOPE[k];if(!re)return true;return re.test(p.name||'');}
 function normalizeItems(r,grounded,meta){const sup=normN(meta&&meta.supported||'');const hasSup=!!sup;(r.items||[]).forEach(p=>{if(!p)return;p.v=p.v||{};
   const oem=(Array.isArray(p.oem)?p.oem:p.oem?[p.oem]:[]).map(o=>typeof o==='string'?{number:o,source:null}:o).filter(o=>o&&o.number);
@@ -376,13 +380,13 @@ function normalizeItems(r,grounded,meta){const sup=normN(meta&&meta.supported||'
     p.crossRefs.forEach(c=>{p.v[normN(c.number)]={status:judge(c.number,c.source),source:c.source};});
     p.vdone=true;const st2=Object.values(p.v).map(z=>z.status),good=st2.filter(z=>z==='confirmed').length+st2.filter(z=>z==='claimed').length*0.5;p.confidence=!st2.length?'low':good===st2.length?'high':good?'medium':'low';}});
   return r;}
-function vCounts(items){const c={confirmed:0,corrected:0,unconfirmed:0,added:0,claimed:0};items.forEach(p=>Object.values(p.v||{}).forEach(z=>c[z.status]=(c[z.status]||0)+1));return c;}
+function vCounts(items){const c={confirmed:0,corrected:0,unconfirmed:0,added:0,claimed:0,repco:0};items.forEach(p=>Object.values(p.v||{}).forEach(z=>c[z.status]=(c[z.status]||0)+1));return c;}
 function renderParts(r,label,key){const items=(r.items||[]).filter(Boolean);r.items=items;st.pitems=items;st.pres=r;st.pkey=key;const el=$('#presults');
   if(!items.length){el.innerHTML=`<p class="muted">Nothing found for ${esc(label)}. Try another wording or a category.</p>`;return;}
   const c=vCounts(items),done=items.every(p=>p.vdone);
   const vbar=!canVerify()?`<p class="warn">Numbers below are unverified AI suggestions. Add a Gemini key in Settings to check them against the web.</p>`
     :r.verifying?`<div class="vbar">${skel('Checking numbers against Google: catalogues and AU retailers…')}</div>`
-    :(c.confirmed+c.corrected+c.added+c.unconfirmed+c.claimed)?`<div class="vbar"><b>Web check:</b> <span class="vb ok">✓ ${c.confirmed+c.added} verified</span> <span class="vb fix">⚠ ${c.claimed} check source</span>${c.corrected?` <span class="vb fix">✎ ${c.corrected} corrected</span>`:''} <span class="vb unk">? ${c.unconfirmed} unverified</span>${!done?' <button class="linkbtn" data-act="verifyall" type="button">Check the rest</button>':''}${c.unconfirmed?` <button class="linkbtn" data-act="togunv" type="button">${st.showUnv?'Hide':'Show'} ${c.unconfirmed} unverified</button>`:''}${r.vsummary?`<div class="small muted">${esc(r.vsummary)}</div>`:''}</div>`
+    :(c.confirmed+c.corrected+c.added+c.unconfirmed+c.claimed+c.repco)?`<div class="vbar"><b>Web check:</b> ${c.repco?`<span class="vb repco">✓ ${c.repco} Repco fit</span> `:''}<span class="vb ok">✓ ${c.confirmed+c.added} verified</span> <span class="vb fix">⚠ ${c.claimed} check source</span>${c.corrected?` <span class="vb fix">✎ ${c.corrected} corrected</span>`:''} <span class="vb unk">? ${c.unconfirmed} unverified</span>${!done?' <button class="linkbtn" data-act="verifyall" type="button">Check the rest</button>':''}${c.unconfirmed?` <button class="linkbtn" data-act="togunv" type="button">${st.showUnv?'Hide':'Show'} ${c.unconfirmed} unverified</button>`:''}${r.vsummary?`<div class="small muted">${esc(r.vsummary)}</div>`:''}</div>`
     :`<div class="vbar"><button class="btn sm primary" data-act="verifyall" type="button">✓ Verify all numbers with Google</button> <span class="small muted">Checks each number against catalogues and AU retailers</span></div>`;
   el.innerHTML=`<div class="rhead"><div><b>${esc(label)}</b> <span class="muted small">${items.length} parts</span>${r.interpreted?`<div class="small muted">${esc(r.interpreted)}</div>`:''}</div><button class="btn sm" data-act="copyall" type="button">Copy all</button></div>
 ${vbar}${r.tips?`<p class="warn">ℹ ${esc(r.tips)}</p>`:''}${items.map(partHTML).join('')}
@@ -421,6 +425,7 @@ const iconFor=n=>{for(const[r,k]of ICON_RULES)if(r.test(n||''))return ICON[k];re
 const normN=x=>String(x||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
 function vstate(p,num){return p.v&&p.v[normN(num)];}
 function numBadge(p,num){const v=vstate(p,num);if(!v)return'';const src=v.source&&/^https?:/.test(v.source)?lnk(v.source,'source'):'';
+  if(v.status==='repco')return `<span class="vb repco" title="Confirmed fit in Repco's catalogue (your imported page)">✓ Repco fit</span>${v.source?lnk(v.source,'view'):''}`;
   if(v.status==='confirmed')return `<span class="vb ok" title="Confirmed by web search">✓ verified</span>${src}`;
   if(v.status==='corrected')return `<span class="vb fix">✎ corrected to <code>${esc(v.correct)}</code></span>${src}`;
   if(v.status==='added')return `<span class="vb ok">✓ found online</span>${src}`;
@@ -438,7 +443,7 @@ function catalogLinks(p){const t=`${p.name} ${JSON.stringify(p.specs||{})}`;cons
   const v=st.vehicle?.vinStr;out.push([v?'Genuine catalogue (your VIN)':'Genuine catalogue (Partsouq)',v?`https://partsouq.com/en/search/all?q=${v}`:'https://partsouq.com/']);
   return `<div class="cats-official"><span class="small muted">Confirm in the official catalogue:</span> ${out.map(([n,u])=>lnk(u,n+' ↗')).join('')}</div>`;}
 function hidden(p,n){const v=vstate(p,n);return!st.showUnv&&v&&v.status==='unconfirmed';}
-function partHTML(p,i){const oem=(Array.isArray(p.oem)?p.oem:p.oem?[p.oem]:[]).filter(Boolean);p.oem=oem;const refs=(p.crossRefs||[]).filter(c=>c&&c.number).sort((x,y)=>isPref(y.brand)-isPref(x.brand));
+function partHTML(p,i){const oem=(Array.isArray(p.oem)?p.oem:p.oem?[p.oem]:[]).filter(Boolean);p.oem=oem;const isR=c=>vstate(p,c.number)?.status==='repco';const refs=(p.crossRefs||[]).filter(c=>c&&c.number).sort((x,y)=>(isR(y)-isR(x))||(isPref(y.brand)-isPref(x.brand)));
   const num=n=>{const v=vstate(p,n);return v&&v.status==='corrected'?`<code class="struck">${esc(n)}</code>`:v&&v.status==='unconfirmed'?`<code class="dim">${esc(n)}</code>`:`<code>${esc(n)}</code>`;};
   return `<div class="pcard" data-i="${i}"><div class="ptop"><a class="pthumb" href="https://www.google.com/search?tbm=isch&q=${qv(photoQuery(p))}" target="_blank" rel="noopener" title="See real photos"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconFor(p.name)}</svg><span>Photos ↗</span></a>
 <div class="pmain"><div class="pn"><b>${esc(p.name)}</b>${p.position?`<span class="pos">${esc(p.position)}</span>`:''}${p.qty?`<span class="qty">×${esc(p.qty)}</span>`:''}${conf(p.confidence)}</div>${kv(p.specs)}</div></div>
@@ -485,6 +490,51 @@ $('#presults').addEventListener('click',async e=>{const b=e.target.closest('[dat
       out.innerHTML=ls.length?`<div class="listings">${ls.map(l=>`<a class="lk" href="${esc(l.url)}" target="_blank" rel="noopener"><b>${esc(l.store)} ↗</b><span>${esc(l.title)}</span><span class="mono">${esc([l.partNumber,l.price].filter(Boolean).join(' · '))}</span></a>`).join('')}</div>${r.note?`<p class="small muted">${esc(r.note)}</p>`:''}`:`<p class="muted small">No listings found. ${esc(r.note||'')}</p>`;}
     catch(err){out.innerHTML=errBox(err);}b.disabled=false;}});
 
+/* ---------- Import a saved Repco page (stays in this browser only) ---------- */
+const RKEY='ps-repco';
+function loadRepco(){try{return JSON.parse(localStorage.getItem(RKEY)||'[]')}catch(e){return[]}}
+function saveRepco(a){try{localStorage.setItem(RKEY,JSON.stringify(a));}catch(e){alertBox('Couldn’t save: browser storage is full or blocked.');}}
+const SKIPTOK=/^(\d+|\d+(mm|v|a|th|wd|in|inch|l)|4x4|4wd|suv|n95|cw|ccw)$/;
+function slugInfo(url){const slug=(url.split('/p/')[0].split('/').pop()||'');const t=slug.split('-');let idx=-1;
+  for(let k=t.length-1;k>=0;k--){if(/[a-z]/.test(t[k])&&/\d/.test(t[k])&&!SKIPTOK.test(t[k])){idx=k;break;}}
+  let number=null,words=t;if(idx>=0){number=t[idx];if(t[idx+1]&&t[idx+1].length===1)number+='-'+t[idx+1];words=t.slice(0,idx);}
+  return{number:number?number.toUpperCase():null,name:words.join(' ')};}
+function parseRepcoHTML(txt,fname){const doc=new DOMParser().parseFromString(txt,'text/html');const body=(doc.body?.textContent||'').replace(/\s+/g,' ');
+  const vm=body.match(/My Vehicles\s+(.+?)\s+\+\s*Add a vehicle/i);const vehicle=vm?vm[1].trim():'';
+  const em=body.match(/\b([A-Z]{2,3}\d{2}[A-Za-z0-9]*\s+(?:[A-Z0-9]{2,6}\s+)*[^|]{0,40}?(?:Diesel|Petrol|Hybrid)[^|]{0,40})/);
+  const canon=doc.querySelector('link[rel=canonical]')?.href||'';const items=[];const seen=new Set();
+  doc.querySelectorAll('[data-sku][data-url]').forEach(el=>{const sku=el.getAttribute('data-sku');if(seen.has(sku))return;seen.add(sku);
+    const url=el.getAttribute('data-url')||'';const info=slugInfo(url);const cat=(url.split('/p/')[0].split('/').slice(-2,-1)[0]||'').replace(/-/g,' ');
+    items.push({sku,brand:el.getAttribute('data-brand')||'',number:info.number,name:info.name,cat,price:el.getAttribute('data-price')||'',fit:el.getAttribute('data-fitcode')||'',url:url.startsWith('http')?url:'https://www.repco.com.au'+url});});
+  return{vehicle,engine:em?em[1].trim().slice(0,70):'',source:canon||fname,date:new Date().toISOString().slice(0,10),items};}
+function repcoForVehicle(){const v=st.vehicle;if(!v||v.manual)return[];const hay=`${v.vehicle} ${v.year||''} ${v.make||''} ${v.model||''}`.toLowerCase();
+  const out=[];loadRepco().forEach(pg=>{const toks=(pg.vehicle||'').toLowerCase().split(/\s+/).filter(t=>t.length>1);if(toks.length&&toks.every(t=>hay.includes(t)))pg.items.forEach(it=>{if(!out.some(o=>o.sku===it.sku))out.push({...it,vehicle:pg.vehicle,fitted:pg.items.length&&it.fit==='HARD_FITMENT'});});});
+  return out;}
+const KEYW=['brake','front','rear','oil','air','cabin','fuel','filter','pad','pads','rotor','disc','caliper','wiper','blade','refill','water','pump','alternator','starter','radiator','belt','tensioner','sensor','knock','speed','headlight','clutch','bearing','shock','absorber','gasket','valve','suction','overflow','bottle','tank','kit','seal','spark','glow','plug','globe','battery','hose','thermostat','mount','link','joint'];
+const DISTINCT=['alternator','starter','radiator','tensioner','clutch','headlight','caliper','rotor','absorber','thermostat','battery'];
+function repcoMatches(p,list){const nw=(p.name||'').toLowerCase().split(/[^a-z]+/).filter(w=>KEYW.includes(w));if(!nw.length)return[];
+  return list.filter(it=>{const iw=`${it.name} ${it.cat}`.toLowerCase().split(/[^a-z]+/);const shared=nw.filter(w=>iw.includes(w));
+    const core=shared.filter(w=>w!=='front'&&w!=='rear');return core.length>=2||core.some(w=>DISTINCT.includes(w));});}
+function attachRepco(r){const list=repcoForVehicle();if(!list.length)return r;r.repcoN=list.length;
+  (r.items||[]).forEach(p=>{const ms=repcoMatches(p,list);if(!ms.length)return;p.v=p.v||{};
+    ms.forEach(it=>{if(!it.number)return;const exists=(p.crossRefs||[]).find(c=>normN(c.number)===normN(it.number));
+      if(!exists)p.crossRefs=[{brand:it.brand,number:it.number,store:'Repco',source:it.url,notes:`${cap(it.name)} · $${(+it.price).toFixed(2)}`},...(p.crossRefs||[])];
+      p.v[normN(it.number)]={status:'repco',source:it.url};});
+    p.confidence='high';p.repco=true;});return r;}
+function repcoPromptLine(){const list=repcoForVehicle().filter(i=>i.number).slice(0,45);if(!list.length)return'';
+  return `REPCO CATALOGUE FACTS for this vehicle (confirmed fitment, treat as ground truth and use these numbers where relevant): ${list.map(i=>`${i.brand} ${i.number} (${i.name})`).join('; ')}.`;}
+function renderRepcoPanel(){const el=$('#repcoPanel');if(!el)return;const list=repcoForVehicle();const pages=loadRepco();
+  const groups={};list.forEach(i=>{(groups[i.cat||'other']=groups[i.cat||'other']||[]).push(i);});
+  el.innerHTML=`${list.length?`<details class="repco-box"${list.length<=8?' open':''}><summary><b>✓ ${list.length} Repco-confirmed parts</b> for ${esc(list[0].vehicle)} <span class="small muted">(from pages you imported)</span></summary>
+${Object.entries(groups).map(([g,its])=>`<div class="rgrp"><div class="nlab">${esc(g)}</div>${its.map(i=>`<div class="ritem"><span><b>${esc(i.brand)}</b> ${i.number?`<code>${esc(i.number)}</code>`:''} <span class="small muted">${esc(cap(i.name))}</span></span><span class="small">${i.price?'$'+(+i.price).toFixed(2):''} ${lnk(i.url,'Repco ↗')}</span></div>`).join('')}</div>`).join('')}</details>`:''}
+<div class="rimport"><label class="btn sm" for="repcoFile">📄 Import a saved Repco page</label><input id="repcoFile" type="file" accept=".html,.htm,text/html" multiple hidden>
+<span class="small muted">${pages.length?`${pages.length} page${pages.length>1?'s':''} imported · <button class="linkbtn" id="repcoClear" type="button">clear</button>`:'On repco.com.au pick your car, open a category or search, save the page, then import it here. It stays in this browser only.'}</span></div>`;
+  $('#repcoFile').onchange=async e=>{const files=[...e.target.files];let added=0,msg=[];const pgs=loadRepco();
+    for(const f of files){try{const pg=parseRepcoHTML(await f.text(),f.name);if(!pg.items.length){msg.push(`${f.name}: no products found`);continue;}
+      const i=pgs.findIndex(x=>x.source===pg.source&&x.vehicle===pg.vehicle);if(i>=0)pgs[i]=pg;else pgs.push(pg);added+=pg.items.length;msg.push(`${pg.items.length} parts${pg.vehicle?' for '+pg.vehicle:' (no vehicle selected on that page)'}`);}catch(err){msg.push(`${f.name}: couldn’t read it`);}}
+    saveRepco(pgs);st.pcache={};renderRepcoPanel();toast('Imported '+msg.join(' · '));setTimeout(()=>toast(''),5000);};
+  const c=$('#repcoClear');if(c)c.onclick=()=>{saveRepco([]);st.pcache={};renderRepcoPanel();};}
+function alertBox(t){toast(t);setTimeout(()=>toast(''),4000);}
 /* ---------- engine detail panel (called by diagram.js) ---------- */
 function renderDetail(){const el=$('#detail'),c=st.sel;if(!c){el.innerHTML='<p class="muted" style="margin:0">Tap any part of the engine, or a chip above, to see what it does on this engine.</p>';return;}
   const note=st.spec?.components?.[c],gen=GEN[c]||'',manual=st.vehicle?.manual;
