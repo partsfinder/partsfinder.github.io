@@ -16,13 +16,14 @@ function updateAiBadge(){const m=aiMode(),b=$('#aiBadge');if(!b)return;
 function parseLoose(t){if(t==null)throw new Error('Empty answer');if(typeof t==='object')return t;t=String(t);
   const fence=t.match(/```(?:json)?\s*([\s\S]*?)```/i);if(fence&&fence[1].includes('{'))t=fence[1];
   const a=t.indexOf('{'),b=t.lastIndexOf('}');if(a<0||b<0)throw new Error('The answer had no data in it');return JSON.parse(t.slice(a,b+1));}
-async function apiCall(prompt,{web=false,maxTokens=12000}={}){
+async function apiCall(prompt,{web=false,maxTokens=12000,meta=null}={}){
   const body={model:cfg.model||'claude-sonnet-5-5',max_tokens:maxTokens,messages:[{role:'user',content:prompt}]};
   if(web)body.tools=[{type:'web_search_20250305',name:'web_search',max_uses:6}];
   let r;try{r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':cfg.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify(body)});}
   catch(e){const x=new Error('Couldn’t reach the Anthropic API from this page.');x.code='network';throw x;}
   const j=await r.json().catch(()=>({}));
   if(!r.ok){const x=new Error(j?.error?.message||('HTTP '+r.status));x.code=r.status===429||r.status===529?'rate_limited':r.status===401||r.status===403?'bad_key':'api';throw x;}
+  if(meta){meta.sources=[];(j.content||[]).filter(b=>b.type==='web_search_tool_result'&&Array.isArray(b.content)).forEach(b=>b.content.forEach(x=>x.url&&meta.sources.push({uri:x.url,title:x.title||x.url})));}
   return(j.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');}
 const GEM_MODELS=['gemini-flash-latest','gemini-3.7-flash','gemini-3.6-flash','gemini-3.5-flash','gemini-3-flash-preview','gemini-2.5-flash','gemini-flash-lite-latest'];
 const GBASE='https://generativelanguage.googleapis.com/v1beta';
@@ -43,21 +44,21 @@ async function geminiModels(){if(gList)return gList;let found=[];
 const gSlow=new Set();
 function gBody(prompt,m,{web,maxTokens,think}){const gc={maxOutputTokens:maxTokens};if(think)gc.thinkingConfig=/gemini-2\./.test(m)?{thinkingBudget:512}:{thinkingLevel:'low'};
   const body={contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:gc};if(web)body.tools=[{google_search:{}}];return body;}
-async function geminiOnce(prompt,m,o,ms){let think=!cfg.gNoThink;
+async function geminiOnce(prompt,m,o={},ms){let think=!cfg.gNoThink;
   for(let attempt=0;attempt<2;attempt++){
     const r=await gfetch(`${GBASE}/models/${m}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':cfg.geminiKey},body:JSON.stringify(gBody(prompt,m,{...o,think}))},ms);
     const j=await r.json().catch(()=>({}));
-    if(r.ok){const c=j.candidates?.[0];const t=(c?.content?.parts||[]).filter(p=>p.text&&!p.thought).map(p=>p.text).join('');
+    if(r.ok){const c=j.candidates?.[0];if(o.meta){o.meta.sources=((c?.groundingMetadata?.groundingChunks)||[]).map(g=>g.web).filter(Boolean).map(w=>({uri:w.uri,title:w.title||w.domain||w.uri}));}const t=(c?.content?.parts||[]).filter(p=>p.text&&!p.thought).map(p=>p.text).join('');
       if(!t){const x=new Error(c?.finishReason?`No answer (${c.finishReason}).`:(j.promptFeedback?.blockReason?`Blocked (${j.promptFeedback.blockReason}).`:'Empty answer.'));x.code='empty';throw x;}return t;}
     const msg=j?.error?.message||('HTTP '+r.status);
     if(r.status===400&&think&&/think/i.test(msg)){think=false;cfg.gNoThink=true;saveCfg();continue;}
     const x=new Error(msg);x.status=r.status;x.code=(r.status===401||r.status===403||(r.status===400&&/api key/i.test(msg)))?'bad_key':r.status===429?'rate_limited':'api';throw x;}}
-async function geminiCall(prompt,{web=false,maxTokens=16000,tier='default'}={}){const all=await geminiModels();const fast=tier==='quick'||(tier==='parts'&&(cfg.speed||'fast')==='fast');
+async function geminiCall(prompt,{web=false,maxTokens=16000,tier='default',meta=null}={}){const all=await geminiModels();const fast=tier==='quick'||(tier==='parts'&&(cfg.speed||'fast')==='fast');
   let list=fast?[...all.filter(m=>/lite/.test(m)),...all.filter(m=>!/lite/.test(m))]:all;
   list=[...list.filter(m=>!gSlow.has(m)),...list.filter(m=>gSlow.has(m))];
   const ms=web?100000:tier==='quick'?25000:60000;let last=null,tries=0;
   for(const m of list){if(tries>=4)break;tries++;
-    try{const t=await geminiOnce(prompt,m,{web,maxTokens},ms);gSlow.delete(m);if(!/lite/.test(m)&&cfg.gModel!==m){cfg.gModel=m;saveCfg();}return t;}
+    try{const t=await geminiOnce(prompt,m,{web,maxTokens,meta},ms);gSlow.delete(m);if(!/lite/.test(m)&&cfg.gModel!==m){cfg.gModel=m;saveCfg();}return t;}
     catch(e){last=e;
       if(e.code==='bad_key'||e.code==='network')throw e;
       if(e.code==='timeout'){gSlow.add(m);continue;}
@@ -130,8 +131,8 @@ const vshort=()=>{const v=st.vehicle||{};return[v.year,v.make,v.model].filter(Bo
 /* ---------- prompts ---------- */
 function ctxLine(){const v=st.vehicle,e=st.engine;return `Vehicle: ${v.vehicle}${v.market?` (${v.market} market)`:''}${v.vinStr?`. VIN: ${v.vinStr}`:''}${v.rego?`. Rego: ${v.rego}`:''}. Engine: ${e?.label||'unknown'}${e?.code?` [${e.code}]`:''}.`;}
 function ctx(){return ctxLine()+` Known engine data: ${JSON.stringify(st.spec?.engine||{})}`;}
-function idPrompt(q,hint){return `You are an automotive data expert at an Australian parts counter. Identify the vehicle described below and list its factory engine options.
-Input: "${q}"${hint?`\nEngine hint from the user: "${hint}"`:''}
+function idPrompt(q,hint,facts){return `You are an automotive data expert at an Australian parts counter. Identify the vehicle described below and list its factory engine options.
+Input: "${q}"${facts?`\nFacts decoded from the VIN by fixed rules (these are correct; do not contradict them, and never guess the model from VIN characters): ${facts}`:''}${hint?`\nEngine hint from the user: "${hint}"`:''}
 The user is in Australia: prefer the Australian-market (ADM) spec when models differ by market, but list every engine that plausibly matches.
 If the input contains a 17-character VIN, decode it as far as you reliably can (maker, model year character, plant, model and engine where the maker encodes it). If an engine hint is given and matches an option, list it first.
 Return ONLY JSON:
@@ -156,9 +157,9 @@ ${cat?`Category requested: ${cat}`:`Customer's search: "${query}"`}
 Read abbreviations and trade slang the way a parts interpreter would (e.g. LCA = lower control arm, W/B = wiper blade, H7 = headlight globe type, "15A" = fuse rating). This covers the WHOLE vehicle, not just the engine.
 List the matching parts fitted to this vehicle (up to 20, most commonly needed first). List positions separately (front/rear, LH/RH; in Australia RH is the driver side) when part numbers or sizes differ.
 For every part give:
-- "oem": genuine part number(s) as an array. Include a number ONLY if you are confident it is right for this vehicle; otherwise an empty array.
+- "oem": genuine part number(s) as an array. Include a number ONLY if you have actually seen it listed for this vehicle; otherwise an empty array. Never guess or construct numbers.
 - "specs": the details a counter person checks, as key-value pairs. E.g. thread size and pitch, length, diameter, hole size, globe type/base/wattage/voltage, fuse rating/type/position, wiper length in mm and inches plus connector, capacity, CCA, viscosity, dimensions.
-- "crossRefs": aftermarket equivalents commonly stocked in Australia (brands such as Narva, OEX, Projecta, Philips, Osram, Hella, Ryco, Wesfil, Sakura, NGK, Denso, Bosch, Bendix, DBA, RDA, Protex, Gates, Dayco, Mackay, KYB, Monroe, Pedders, Tridon, Bosal, Valeo, Trico, Exedy, Repco own brand), as {"brand","number","store":"where it is usually sold, e.g. Repco / Burson / Supercheap","notes"}. Only numbers you are confident of. Leave numbers out rather than inventing them.
+- "crossRefs": aftermarket equivalents commonly stocked in Australia (brands such as Narva, OEX, Projecta, Philips, Osram, Hella, Ryco, Wesfil, Sakura, NGK, Denso, Bosch, Bendix, DBA, RDA, Protex, Gates, Dayco, Mackay, KYB, Monroe, Pedders, Tridon, Bosal, Valeo, Trico, Exedy, Repco own brand), as {"brand","number","store":"where it is usually sold, e.g. Repco / Burson / Supercheap","notes"}. Only numbers you are confident of. Never build a number from a pattern or guess one that looks right: an empty list is better than a wrong number, because every number is checked against the web afterwards and false ones are flagged to the customer.
 Return ONLY JSON:
 {"interpreted":"one line on how you read the request","items":[{"name":"","position":"","oem":[],"specs":{},"qty":"","crossRefs":[],"notes":"","confidence":"high|medium|low"}],"tips":"optional short note, e.g. check build date or VIN for a split"}`;}
 function xrefPrompt(num,veh){return `You are an expert parts interpreter in Australia. Cross-reference this part number.
@@ -225,14 +226,44 @@ ${refs.length?`<table class="xt"><thead><tr><th>Brand</th><th>Number</th><th>Typ
 ${r.warning?`<p class="warn">⚠ ${esc(r.warning)}</p>`:''}<div class="plinks">Search the original number: ${storeLinks(r.number||'')}${lnk(`https://partsouq.com/en/search/all?q=${qv(r.number||'')}`,'Partsouq')}</div></div>`;}
 
 /* ---------- vehicle search ---------- */
-async function runSearch(q,hint,extra={}){const my=++st.ver;saveRecent(q,hint);$('#choose').hidden=true;$('#result').hidden=true;status('Identifying vehicle…',true);
-  try{const r=await ask(idPrompt(q,hint),{json:true,tier:'quick',maxTokens:4000});if(my!==st.ver)return;
+/* ---------- VIN decoding by rule (maker + year), plus the free NHTSA decoder ---------- */
+const WMI={LGW:'Great Wall Motor (Haval / GWM / Tank / Ora)',LGX:'BYD',LC0:'BYD',LSJ:'MG (SAIC)',LVV:'Chery',LVT:'Chery',LRW:'Tesla (Shanghai)',LFV:'Volkswagen (FAW)',LSV:'Volkswagen (SAIC)',LB3:'Geely',L6T:'Geely',LYV:'Volvo (China)',LS5:'Changan',LVS:'Ford (China)',LVR:'Mazda (China)',
+MR0:'Toyota (Thailand)',MR1:'Toyota (Thailand)',MR2:'Toyota (Thailand)',MHF:'Toyota (Indonesia)',MNB:'Ford (Thailand)',MPA:'Isuzu (Thailand)',MPB:'Ford (Thailand)',MMA:'Mitsubishi (Thailand)',MMB:'Mitsubishi (Thailand)',MMC:'Mitsubishi (Thailand)',MMT:'Mitsubishi (Thailand)',MM8:'Mazda (Thailand)',MM0:'Mazda (Thailand)',MNT:'Nissan (Thailand)',MRH:'Honda (Thailand)',MA3:'Suzuki (India)',MAL:'Hyundai (India)',MAJ:'Ford (India)',MBH:'Suzuki (India)',
+JT:'Toyota (Japan)',JN:'Nissan (Japan)',JM:'Mazda (Japan)',JF:'Subaru',JH:'Honda (Japan)',JA:'Mitsubishi / Isuzu (Japan)',JMB:'Mitsubishi (Japan)',JMY:'Mitsubishi (Japan)',JS:'Suzuki (Japan)',JDA:'Daihatsu',JAL:'Isuzu (Japan)',JLS:'Lexus',JTH:'Lexus',JTJ:'Lexus',
+'6T1':'Toyota (Australia)','6G1':'Holden (Australia)','6G2':'Holden (Australia)','6H8':'Holden (Australia)','6FP':'Ford (Australia)','6MM':'Mitsubishi (Australia)',
+KMH:'Hyundai (Korea)',KMF:'Hyundai (Korea)',KNA:'Kia (Korea)',KNC:'Kia (Korea)',KND:'Kia (Korea)',KNE:'Kia (Korea)',KPT:'SsangYong / KGM',KMT:'Genesis',KL1:'Holden / GM Korea',KL3:'Holden / GM Korea',KLA:'Holden / Daewoo',
+WBA:'BMW',WBS:'BMW M',WBY:'BMW i',WMW:'MINI',WDB:'Mercedes-Benz',WDD:'Mercedes-Benz',WDC:'Mercedes-Benz',W1K:'Mercedes-Benz',W1N:'Mercedes-Benz',W1V:'Mercedes-Benz Van',WAU:'Audi',WUA:'Audi Sport',WVW:'Volkswagen',WVG:'Volkswagen SUV',WV1:'Volkswagen Commercial',WV2:'Volkswagen Commercial',WP0:'Porsche',WP1:'Porsche SUV',WF0:'Ford (Germany)',W0L:'Opel / Holden',W0V:'Opel / Holden',TMB:'Skoda',VSS:'Seat / Cupra',VF1:'Renault',VF3:'Peugeot',VF7:'Citroen',VR3:'Peugeot',VNK:'Toyota (France)',SAL:'Land Rover',SAJ:'Jaguar',SCC:'Lotus',SJN:'Nissan (UK)',SB1:'Toyota (UK)',ZFA:'Fiat',ZAR:'Alfa Romeo',ZFF:'Ferrari',ZHW:'Lamborghini',YV1:'Volvo',YV4:'Volvo SUV',NMT:'Toyota (Turkey)',NM0:'Ford (Turkey)',U5Y:'Kia (Slovakia)',TMA:'Hyundai (Czech)',
+'5YJ':'Tesla (USA)','7SA':'Tesla (USA)','1FT':'Ford (USA)','1FA':'Ford (USA)','1FM':'Ford (USA)','1GC':'Chevrolet (USA)','1G1':'Chevrolet (USA)','1C4':'Jeep / Chrysler (USA)','1C6':'RAM (USA)','3C6':'RAM (Mexico)','1J4':'Jeep (USA)','1J8':'Jeep (USA)','4T1':'Toyota (USA)','5TD':'Toyota (USA)','3VW':'Volkswagen (Mexico)','5N1':'Nissan (USA)'};
+function vinMaker(v){return WMI[v.slice(0,3)]||WMI[v.slice(0,2)]||null;}
+function vinYear(v){const c=v[9],L='ABCDEFGHJKLMNPRSTVWXY',now=new Date().getFullYear();let y=null;const i=L.indexOf(c);if(i>=0)y=2010+i;else if(/[1-9]/.test(c))y=2000+ +c;if(y&&y>now+1)y-=30;return y;}
+async function nhtsa(v){try{const r=await gfetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${v}?format=json`,{},8000);const j=await r.json();const x=(j.Results||[])[0]||{};
+  const g=k=>(x[k]||'').trim();return{make:g('Make'),model:g('Model'),year:g('ModelYear'),trim:g('Trim'),series:g('Series'),disp:g('DisplacementL'),engine:g('EngineModel'),cyl:g('EngineCylinders'),fuel:g('FuelTypePrimary'),body:g('BodyClass')};}catch(e){return{};}}
+async function vinFlow(v,hint,extra){const my=++st.ver;saveRecent(v,hint);$('#choose').hidden=true;$('#result').hidden=true;status('Decoding VIN…',true);
+  const maker=vinMaker(v),year=vinYear(v),n=await nhtsa(v);if(my!==st.ver)return;
+  const mk=n.make||maker,yr=n.year||year;
+  const facts=[mk?`maker ${mk} (from the first 3 characters, "${v.slice(0,3)}")`:'',yr?`model year ${yr} (from the 10th character, "${v[9]}")`:'',n.model?`model ${n.model}${n.trim?' '+n.trim:''}${n.series?' '+n.series:''} (official NHTSA decode)`:'',n.disp?`engine ${n.disp} L${n.engine?' '+n.engine:''}${n.cyl?' '+n.cyl+'-cyl':''}`:''].filter(Boolean).join('; ');
+  if(n.model){status('');return runSearch(`${yr} ${n.make} ${n.model} ${n.trim||''}`.trim(),hint,{...extra,vin:v,facts,noVinFlow:true});}
+  if(hint&&/[a-z]/i.test(hint)){status('');return runSearch(`${yr||''} ${maker||''} ${hint}`.trim(),'',{...extra,vin:v,facts,noVinFlow:true});}
+  status('');pickModel(v,mk,yr,facts,extra);}
+async function pickModel(v,mk,yr,facts,extra){const c=$('#choose');c.hidden=false;
+  $('#chooseTitle').textContent=`${yr||'Unknown year'} ${mk||'Unknown maker'}`;
+  $('#chooseMsg').innerHTML=`From VIN <code>${esc(v)}</code>. A VIN reliably shows the maker and year, but for most cars sold in Australia the model is in a maker-only code. <b>Pick your model:</b>`;
+  $('#engList').innerHTML=`<div class="row" style="grid-column:1/-1"><input id="pmIn" type="text" placeholder="Type the model, e.g. H6 Ultra"><button class="btn primary" id="pmGo" type="button">Go</button></div><div id="pmList" class="chips" style="grid-column:1/-1">${mk?skel('Listing models…'):''}</div>`;
+  const go=m=>{if(!m)return;runSearch(`${yr||''} ${m}`.trim(),'',{...extra,vin:v,facts:facts+`; model ${m} (chosen by the owner)`,noVinFlow:true});};
+  $('#pmGo').onclick=()=>go($('#pmIn').value.trim());$('#pmIn').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();go($('#pmIn').value.trim());}};
+  $('#pmIn').focus();if(!mk){$('#pmList').innerHTML='';return;}
+  try{const r=await ask(`List the car and light-commercial models (with the brand name as sold) that ${mk} sold new in Australia around model year ${yr||'unknown'}. Include every sub-brand of this maker. Return ONLY JSON: {"models":["Brand Model",...]} with at most 24 entries, most popular first.`,{json:true,tier:'quick',maxTokens:2000});
+    const ms=(r.models||[]).filter(x=>typeof x==='string').slice(0,24);
+    $('#pmList').innerHTML=ms.length?ms.map(m=>`<button class="chip" type="button">${esc(m)}</button>`).join(''):'';$$('#pmList .chip').forEach(b=>b.onclick=()=>go(b.textContent));}
+  catch(e){$('#pmList').innerHTML='';}}
+async function runSearch(q,hint,extra={}){const qv0=q.replace(/\s/g,'').toUpperCase();if(!extra.noVinFlow&&isVin(qv0))return vinFlow(qv0,hint,extra);const my=++st.ver;saveRecent(q,hint);$('#choose').hidden=true;$('#result').hidden=true;status('Identifying vehicle…',true);
+  try{const r=await ask(idPrompt(q,hint,extra.facts),{json:true,tier:'quick',maxTokens:4000});if(my!==st.ver)return;
     if(!r.found||!Array.isArray(r.engines)||!r.engines.length){status(esc(r.message||'Couldn’t identify that vehicle. Try adding the year, model or engine.'),false,true);return;}
     const vinM=(q.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)||[])[0];r.vinStr=(extra.vin||vinM||'').toUpperCase()||null;r.rego=extra.rego||null;
     st.vehicle=r;status('');renderChoices(r);if(r.engines.length===1)chooseEngine(r.engines[0]);}
   catch(e){if(my!==st.ver)return;status(errBox(e),false,true);}}
 function renderChoices(r){$('#choose').hidden=false;$('#chooseTitle').textContent=r.engines.length>1?`${r.vehicle}: which engine?`:r.vehicle;
-  $('#chooseMsg').textContent=[r.vin?.decoded?`VIN: ${r.vin.decoded} (${r.vin.confidence||'?'} confidence)`:'',r.message||''].filter(Boolean).join(' · ');
+  $('#chooseMsg').textContent=[r.vinStr?`VIN ${r.vinStr}`:'',r.message||''].filter(Boolean).join(' · ');
   $('#engList').innerHTML=r.engines.map((e,i)=>`<button class="eng" data-i="${i}" type="button"><b>${esc(e.label)}</b><span>${esc([e.years,e.notes].filter(Boolean).join(' · '))}</span></button>`).join('');
   $$('#engList .eng').forEach(b=>b.onclick=()=>chooseEngine(r.engines[+b.dataset.i]));}
 function chooseEngine(e){const my=++st.ver;st.engine=e;st.spec=null;st.sel=null;st.pcache={};
@@ -256,28 +287,99 @@ $('#psq').addEventListener('input',e=>{const h=expandAbbr(e.target.value);$('#ab
 $('#psf').addEventListener('submit',ev=>{ev.preventDefault();const q=$('#psq').value.trim();if(q)partSearch(q);});
 async function partSearch(query,cat){if(!st.vehicle||st.vehicle.manual)return;const my=st.ver;const key=cat?'c:'+cat[0]:'q:'+query.toLowerCase();renderCats(cat?cat[0]:null);
   const el=$('#presults');const label=cat?cat[0]:`“${query}”`;
-  if(st.pcache[key]){renderParts(st.pcache[key],label);return;}
+  if(st.pcache[key]){renderParts(st.pcache[key],label,key);return;}
   el.innerHTML=skel(`Finding ${label} for ${vshort()}…`);
   try{const hints=query?expandAbbr(query):[];const r=await ask(partsPrompt(query?(query+(hints.length?` (${hints.join('; ')})`:'')):null,cat?`${cat[0]}: ${cat[1]}`:null),{json:true,tier:'parts'});
-    if(my!==st.ver)return;st.pcache[key]=r;renderParts(r,label);}
+    if(my!==st.ver)return;st.pcache[key]=r;r.label=label;renderParts(r,label,key);}
   catch(e){if(my!==st.ver)return;el.innerHTML=errBox(e);}}
-function renderParts(r,label){const items=(r.items||[]).filter(Boolean);st.pitems=items;const el=$('#presults');
+function vCounts(items){const c={confirmed:0,corrected:0,unconfirmed:0,added:0};items.forEach(p=>Object.values(p.v||{}).forEach(z=>c[z.status]=(c[z.status]||0)+1));return c;}
+function renderParts(r,label,key){const items=(r.items||[]).filter(Boolean);r.items=items;st.pitems=items;st.pres=r;st.pkey=key;const el=$('#presults');
   if(!items.length){el.innerHTML=`<p class="muted">Nothing found for ${esc(label)}. Try another wording or a category.</p>`;return;}
+  const c=vCounts(items),done=items.every(p=>p.vdone);
+  const vbar=!canVerify()?`<p class="warn">Numbers below are unverified AI suggestions. Add a Gemini key in Settings to check them against the web.</p>`
+    :r.verifying?`<div class="vbar">${skel('Checking numbers against Google: catalogues and AU retailers…')}</div>`
+    :(c.confirmed+c.corrected+c.added+c.unconfirmed)?`<div class="vbar"><b>Web check:</b> <span class="vb ok">✓ ${c.confirmed+c.added} verified</span> <span class="vb fix">✎ ${c.corrected} corrected</span> <span class="vb unk">? ${c.unconfirmed} unverified</span>${!done?' <button class="linkbtn" data-act="verifyall" type="button">Check the rest</button>':''}${r.vsummary?`<div class="small muted">${esc(r.vsummary)}</div>`:''}</div>`
+    :`<div class="vbar"><button class="btn sm primary" data-act="verifyall" type="button">✓ Verify all numbers with Google</button> <span class="small muted">Checks each number against catalogues and AU retailers</span></div>`;
   el.innerHTML=`<div class="rhead"><div><b>${esc(label)}</b> <span class="muted small">${items.length} parts</span>${r.interpreted?`<div class="small muted">${esc(r.interpreted)}</div>`:''}</div><button class="btn sm" data-act="copyall" type="button">Copy all</button></div>
-${r.tips?`<p class="warn">ℹ ${esc(r.tips)}</p>`:''}${items.map(partHTML).join('')}`;}
+${vbar}${r.tips?`<p class="warn">ℹ ${esc(r.tips)}</p>`:''}${items.map(partHTML).join('')}
+${(r.sources||[]).length?`<details class="more"><summary>Sources checked (${r.sources.length})</summary><ul class="srcs">${r.sources.map(s=>`<li>${lnk(s.uri,esc(s.title))}</li>`).join('')}</ul></details>`:''}`;
+  if(canVerify()&&!r.autoVerified&&!done){r.autoVerified=true;runVerify(r,label,key,items.map((_,i)=>i).slice(0,12));}}
+async function runVerify(r,label,key,idxs){if(!idxs.length)return;r.verifying=true;if(st.pkey===key)renderParts(r,label,key);
+  try{await verifyItems(r,idxs);}catch(e){r.verifyErr=errMsg(e);}
+  r.verifying=false;if(st.pkey===key){renderParts(r,label,key);if(r.verifyErr){$('#presults .rhead').insertAdjacentHTML('afterend',`<div class="errbox small">Web check failed: ${esc(r.verifyErr)}</div>`);r.verifyErr=null;}}}
+const ICON={
+filter:'<rect x="12" y="10" width="24" height="30" rx="4"/><rect x="12" y="6" width="24" height="6" rx="2"/><line x1="17" y1="18" x2="31" y2="18"/><line x1="17" y1="24" x2="31" y2="24"/><line x1="17" y1="30" x2="31" y2="30"/>',
+panel:'<rect x="6" y="14" width="36" height="20" rx="3"/><path d="M10 18 v12 M15 18 v12 M20 18 v12 M25 18 v12 M30 18 v12 M35 18 v12"/>',
+plug:'<rect x="21" y="4" width="6" height="10" rx="1"/><path d="M17 14 h14 v8 h-14z"/><rect x="19" y="22" width="10" height="12"/><line x1="24" y1="34" x2="24" y2="42"/><path d="M24 42 h5"/>',
+globe:'<path d="M24 6 a11 11 0 0 1 7 19 v5 h-14 v-5 a11 11 0 0 1 7 -19z"/><rect x="18" y="30" width="12" height="8" rx="1"/><path d="M21 22 l3 -5 l3 5"/><line x1="24" y1="38" x2="24" y2="43"/>',
+fuse:'<rect x="12" y="8" width="24" height="18" rx="3"/><rect x="15" y="26" width="5" height="14"/><rect x="28" y="26" width="5" height="14"/>',
+relay:'<rect x="10" y="8" width="28" height="26" rx="3"/><path d="M14 34 v8 M22 34 v8 M30 34 v8 M36 34 v8"/>',
+wiper:'<path d="M6 34 Q24 26 42 14"/><path d="M8 37 Q24 29 43 18" stroke-dasharray="2 2"/><circle cx="12" cy="32" r="2"/>',
+clip:'<path d="M14 12 h20 v5 h-20z"/><path d="M20 17 v18 l4 6 l4 -6 v-18"/><path d="M20 24 l-3 3 M28 24 l3 3 M20 30 l-3 3 M28 30 l3 3"/>',
+pad:'<path d="M8 30 Q24 10 40 30 v6 Q24 18 8 36z"/><path d="M10 34 Q24 22 38 34"/>',
+rotor:'<circle cx="24" cy="24" r="18"/><circle cx="24" cy="24" r="8"/><circle cx="24" cy="24" r="2"/><path d="M24 9 v3 M24 36 v3 M9 24 h3 M36 24 h3"/>',
+shock:'<rect x="19" y="4" width="10" height="20" rx="2"/><line x1="24" y1="24" x2="24" y2="38"/><circle cx="24" cy="41" r="3"/><circle cx="24" cy="4" r="2"/>',
+spring:'<polyline points="14,6 34,10 14,14 34,18 14,22 34,26 14,30 34,34 14,38 34,42"/>',
+belt:'<circle cx="14" cy="30" r="8"/><circle cx="34" cy="16" r="6"/><path d="M8 26 L29 12 M20 35 L39 20"/>',
+hose:'<path d="M8 12 Q8 36 24 36 Q40 36 40 12" stroke-width="7" opacity=".6"/><path d="M5 12 h7 M36 12 h7"/>',
+battery:'<rect x="6" y="14" width="36" height="24" rx="2"/><rect x="11" y="9" width="6" height="5"/><rect x="31" y="9" width="6" height="5"/><path d="M12 24 h6 M15 21 v6 M30 24 h6"/>',
+sensor:'<path d="M16 6 h16 l4 7 l-4 7 h-16 l-4 -7z"/><rect x="20" y="20" width="8" height="12"/><path d="M22 32 v10 M26 32 v10"/>',
+gasket:'<rect x="6" y="12" width="36" height="24" rx="5"/><circle cx="17" cy="24" r="6"/><circle cx="31" cy="24" r="6"/>',
+bearing:'<circle cx="24" cy="24" r="17"/><circle cx="24" cy="24" r="8"/><circle cx="24" cy="12.5" r="3"/><circle cx="24" cy="35.5" r="3"/><circle cx="12.5" cy="24" r="3"/><circle cx="35.5" cy="24" r="3"/>',
+bolt:'<path d="M17 6 h14 l3 5 l-3 5 h-14 l-3 -5z"/><rect x="20" y="16" width="8" height="26"/><path d="M20 21 l8 3 M20 27 l8 3 M20 33 l8 3"/>',
+arm:'<path d="M8 36 L24 14 L40 36"/><circle cx="24" cy="12" r="4"/><circle cx="8" cy="36" r="4"/><circle cx="40" cy="36" r="4"/>',
+fluid:'<path d="M16 14 h16 v26 a3 3 0 0 1 -3 3 h-10 a3 3 0 0 1 -3 -3z"/><rect x="20" y="6" width="8" height="8"/><path d="M19 26 h10"/>',
+mirror:'<path d="M8 12 h28 a6 6 0 0 1 6 6 v10 a6 6 0 0 1 -6 6 h-22 l-6 -10z"/><path d="M10 34 l-4 8"/>',
+strut:'<rect x="8" y="20" width="22" height="8" rx="3"/><line x1="30" y1="24" x2="42" y2="24"/><circle cx="6" cy="24" r="2.5"/><circle cx="43" cy="24" r="2.5"/>',
+gear:'<circle cx="24" cy="24" r="9"/><path d="M24 6 v6 M24 36 v6 M6 24 h6 M36 24 h6 M11 11 l4 4 M33 33 l4 4 M37 11 l-4 4 M11 37 l4 -4"/>'};
+const ICON_RULES=[[/cabin|pollen/i,'panel'],[/air filter|air cleaner/i,'panel'],[/filter/i,'filter'],[/glow/i,'plug'],[/spark/i,'plug'],[/globe|bulb|lamp|light|led|hid|drl/i,'globe'],[/fuse/i,'fuse'],[/relay/i,'relay'],[/wiper|blade|refill/i,'wiper'],[/clip|rivet|fastener|retainer|push pin/i,'clip'],[/pad|shoe/i,'pad'],[/rotor|disc|drum/i,'rotor'],[/gas strut|bonnet strut|tailgate strut|boot strut|lift support/i,'strut'],[/shock|strut|damper/i,'shock'],[/spring/i,'spring'],[/belt|timing|chain|tensioner|idler|pulley/i,'belt'],[/hose|pipe/i,'hose'],[/batter/i,'battery'],[/sensor|switch|o2|oxygen|abs|tpms/i,'sensor'],[/gasket|seal|o-ring|washer/i,'gasket'],[/bearing|hub/i,'bearing'],[/nut|bolt|stud|screw|sump plug/i,'bolt'],[/arm|link|joint|tie rod|bush|rack end/i,'arm'],[/oil|coolant|fluid|atf|grease/i,'fluid'],[/mirror/i,'mirror']];
+const iconFor=n=>{for(const[r,k]of ICON_RULES)if(r.test(n||''))return ICON[k];return ICON.gear;};
+const normN=x=>String(x||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+function vstate(p,num){return p.v&&p.v[normN(num)];}
+function numBadge(p,num){const v=vstate(p,num);if(!v)return'';const src=v.source&&/^https?:/.test(v.source)?lnk(v.source,'source'):'';
+  if(v.status==='confirmed')return `<span class="vb ok" title="Confirmed by web search">✓ verified</span>${src}`;
+  if(v.status==='corrected')return `<span class="vb fix">✎ corrected to <code>${esc(v.correct)}</code></span>${src}`;
+  if(v.status==='added')return `<span class="vb ok">✓ found online</span>${src}`;
+  return `<span class="vb unk" title="No web evidence found">? unverified, may not exist</span>`;}
+function photoQuery(p){const o=(p.oem||[])[0];const c=(p.crossRefs||[]).find(c=>c&&c.number);return o?`${o} ${p.name}`:c?`${c.brand} ${c.number}`:`${vshort()} ${p.name}`;}
 function partHTML(p,i){const oem=(Array.isArray(p.oem)?p.oem:p.oem?[p.oem]:[]).filter(Boolean);p.oem=oem;const refs=(p.crossRefs||[]).filter(c=>c&&c.number);
-  return `<div class="pcard" data-i="${i}"><div class="pn"><b>${esc(p.name)}</b>${p.position?`<span class="pos">${esc(p.position)}</span>`:''}${p.qty?`<span class="qty">×${esc(p.qty)}</span>`:''}${conf(p.confidence)}</div>
-${kv(p.specs)}
-<div class="nums"><div class="numrow"><span class="nlab">OEM</span>${oem.length?oem.map(n=>`<code>${esc(n)}</code>`).join(' '):'<span class="muted small">not confirmed, check by VIN</span>'}${oem.length?`<span class="plinks">${lnk(`https://partsouq.com/en/search/all?q=${qv(oem[0])}`,'Partsouq')}${lnk(ebay(oem[0]),'eBay')}<button class="linkbtn" data-act="xref" data-n="${esc(oem[0])}" type="button">Cross-ref</button></span>`:''}</div>
-${refs.map(c=>`<div class="numrow"><span class="nlab">${esc(c.brand)}</span><code>${esc(c.number)}</code>${c.store?`<span class="small muted">${esc(c.store)}</span>`:''}<span class="plinks">${storeLinks(c.number,true)}</span>${c.notes?`<div class="small muted full">${esc(c.notes)}</div>`:''}</div>`).join('')}</div>
+  const num=n=>{const v=vstate(p,n);return v&&v.status==='corrected'?`<code class="struck">${esc(n)}</code>`:v&&v.status==='unconfirmed'?`<code class="dim">${esc(n)}</code>`:`<code>${esc(n)}</code>`;};
+  return `<div class="pcard" data-i="${i}"><div class="ptop"><a class="pthumb" href="https://www.google.com/search?tbm=isch&q=${qv(photoQuery(p))}" target="_blank" rel="noopener" title="See real photos"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconFor(p.name)}</svg><span>Photos ↗</span></a>
+<div class="pmain"><div class="pn"><b>${esc(p.name)}</b>${p.position?`<span class="pos">${esc(p.position)}</span>`:''}${p.qty?`<span class="qty">×${esc(p.qty)}</span>`:''}${conf(p.confidence)}</div>${kv(p.specs)}</div></div>
+<div class="nums"><div class="numrow"><span class="nlab">OEM</span>${oem.length?oem.map(n=>num(n)+numBadge(p,n)).join(' '):'<span class="muted small">not confirmed, check by VIN</span>'}${oem.length?`<span class="plinks">${lnk(`https://partsouq.com/en/search/all?q=${qv(oem[0])}`,'Partsouq')}${lnk(ebay(oem[0]),'eBay')}<button class="linkbtn" data-act="xref" data-n="${esc(oem[0])}" type="button">Cross-ref</button></span>`:''}</div>
+${refs.map(c=>`<div class="numrow"><span class="nlab">${esc(c.brand)}</span>${num(c.number)}${numBadge(p,c.number)}${c.store?`<span class="small muted">${esc(c.store)}</span>`:''}<span class="plinks">${storeLinks(vstate(p,c.number)?.status==='corrected'?vstate(p,c.number).correct:c.number,true)}</span>${c.notes?`<div class="small muted full">${esc(c.notes)}</div>`:''}</div>`).join('')}</div>
 ${p.notes?`<div class="pnote">${esc(p.notes)}</div>`:''}
 <div class="plinks">Search stores: ${storeLinks(`${vshort()} ${p.position||''} ${p.name}`.replace(/\s+/g,' '))}</div>
-<div class="pact">${liveOn()?`<button class="btn sm" data-act="live" type="button">Find live listings</button>`:''}<button class="btn sm ghost" data-act="copy" type="button">Copy</button></div><div class="pout"></div></div>`;}
+<div class="pact">${canVerify()&&!p.vdone?`<button class="btn sm" data-act="verify1" type="button">Verify with Google</button>`:''}${liveOn()?`<button class="btn sm" data-act="live" type="button">Find live listings</button>`:''}<button class="btn sm ghost" data-act="copy" type="button">Copy</button></div><div class="pout"></div></div>`;}
+const canVerify=()=>aiMode()==='gemini'||aiMode()==='api';
+function verifyPrompt(list){return `You are checking a car parts list for accuracy using web search.
+${ctxLine()}
+For each item, search for its part numbers together with this vehicle on manufacturer catalogues and parts sites, e.g. ryco.com.au, wesfil.com.au, sakurafilters, ngk.com.au, narva.com.au, bendix.com.au, dba.com.au, repco.com.au, burson.com.au, supercheapauto.com.au, sparesbox.com.au, partsouq.com, amayama.com, megazip.net, and the car maker's genuine parts sites.
+For every number decide:
+- "confirmed": a source shows this number fits this vehicle (and position).
+- "corrected": sources show a different number is right; put it in "correct".
+- "unconfirmed": you found no evidence either way.
+You may also add important numbers you find with status "added" (put the number in "correct").
+Be strict: only mark confirmed or corrected when a search result actually supports it. Give the URL you relied on in "source".
+Items: ${JSON.stringify(list)}
+Return ONLY JSON: {"items":[{"i":0,"numbers":[{"brand":"OEM or brand name","number":"number as given (or null when added)","status":"confirmed|corrected|unconfirmed|added","correct":null,"source":null}]}],"summary":"one short line"}`;}
+async function verifyItems(r,idxs,onDone){const list=idxs.map(i=>{const p=r.items[i];return{i,name:p.name,position:p.position||'',oem:p.oem||[],aftermarket:(p.crossRefs||[]).filter(c=>c&&c.number).map(c=>({brand:c.brand,number:c.number}))};});
+  const meta={};const v=await ask(verifyPrompt(list),{json:true,web:true,meta,maxTokens:12000});
+  (v.items||[]).forEach(x=>{const p=r.items[+x.i];if(!p)return;p.v=p.v||{};p.vdone=true;
+    (x.numbers||[]).forEach(n=>{if(!n)return;if(n.status==='added'&&n.correct){const exists=[...(p.oem||[]),...(p.crossRefs||[]).map(c=>c.number)].some(z=>normN(z)===normN(n.correct));
+        if(!exists){if(/^oem|genuine/i.test(n.brand||''))p.oem=[...(p.oem||[]),n.correct];else p.crossRefs=[...(p.crossRefs||[]),{brand:n.brand||'Found',number:n.correct}];}
+        p.v[normN(n.correct)]={status:'added',source:n.source};return;}
+      if(n.number)p.v[normN(n.number)]={status:n.status||'unconfirmed',correct:n.correct,source:n.source};});
+    const st2=Object.values(p.v).map(z=>z.status);const good=st2.filter(z=>z!=='unconfirmed').length;p.confidence=!st2.length?p.confidence:good===st2.length?'high':good?'medium':'low';});
+  idxs.forEach(i=>{if(r.items[i])r.items[i].vdone=true;});
+  r.sources=[...(r.sources||[]),...(meta.sources||[])].filter((s,k,a)=>a.findIndex(t=>t.uri===s.uri)===k).slice(0,12);r.vsummary=v.summary||'';onDone&&onDone();}
 const partText=p=>[`${p.name}${p.position?' ('+p.position+')':''}${p.qty?' x'+p.qty:''}`,p.oem?.length?`  OEM: ${p.oem.join(', ')}`:'',...(p.crossRefs||[]).filter(c=>c.number).map(c=>`  ${c.brand}: ${c.number}`),p.specs&&typeof p.specs==='object'?'  '+Object.entries(p.specs).map(([k,v])=>`${k}: ${v}`).join('; '):''].filter(Boolean).join('\n');
 async function copyText(t,btn){const o=btn.textContent;try{await navigator.clipboard.writeText(t);btn.textContent='Copied';}catch(e){btn.textContent='Copy blocked';}setTimeout(()=>btn.textContent=o,1500);}
 $('#presults').addEventListener('click',async e=>{const b=e.target.closest('[data-act]');if(!b)return;const act=b.dataset.act;
   if(act==='copyall'){copyText(`${st.vehicle.vehicle}${st.vehicle.vinStr?' VIN '+st.vehicle.vinStr:''}\n\n`+st.pitems.map(partText).join('\n\n'),b);return;}
+  if(act==='verifyall'){const r=st.pres;runVerify(r,r.label||'',st.pkey,r.items.map((p,i)=>p.vdone?-1:i).filter(i=>i>=0).slice(0,12));return;}
   const card=b.closest('.pcard'),p=st.pitems[+card.dataset.i],out=card.querySelector('.pout');
+  if(act==='verify1'){b.disabled=true;b.textContent='Checking…';const r=st.pres,key=st.pkey;try{await verifyItems(r,[+card.dataset.i]);}catch(err){out.innerHTML=errBox(err);b.disabled=false;b.textContent='Verify with Google';return;}if(st.pkey===key)renderParts(r,r.label||'',key);return;}
   if(act==='copy')copyText(`${vshort()}\n`+partText(p),b);
   else if(act==='xref')xref(b.dataset.n,ctxLine(),out);
   else if(act==='live'){b.disabled=true;out.innerHTML=skel('Searching Australian retailers…');
