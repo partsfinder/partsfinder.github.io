@@ -8,10 +8,10 @@ function saveCfg(){try{localStorage.setItem(CFG_KEY,JSON.stringify(cfg))}catch(e
 /* ---------- AI layer: Claude inside claude.ai, or the user's own Anthropic API key anywhere else ---------- */
 let sample=null;
 const samplePromise=(async()=>{try{if(window.claude&&typeof window.claude.use==='function')sample=await window.claude.use('sample');}catch(e){sample=null}updateAiBadge();return sample;})();
-function aiMode(){const prov=cfg.provider||'gemini';if(prov==='gemini'&&cfg.geminiKey)return'gemini';if(prov==='anthropic'&&cfg.apiKey)return'api';if(cfg.geminiKey)return'gemini';if(cfg.apiKey)return'api';if(sample)return'claude';return'none';}
-const liveOn=()=>(aiMode()==='api'||aiMode()==='gemini')&&!!cfg.live;
+function aiMode(){const prov=cfg.provider||'gemini';if(prov==='groq'&&cfg.groqKey)return'groq';if(prov==='gemini'&&cfg.geminiKey)return'gemini';if(prov==='anthropic'&&cfg.apiKey)return'api';if(cfg.geminiKey)return'gemini';if(cfg.groqKey)return'groq';if(cfg.apiKey)return'api';if(sample)return'claude';return'none';}
+const liveOn=()=>['api','gemini','groq'].includes(aiMode())&&!!cfg.live;
 function updateAiBadge(){const m=aiMode(),b=$('#aiBadge');if(!b)return;
-  b.textContent=(m==='gemini'?'Gemini':m==='api'?'Claude API':m==='claude'?'Claude':'Set up lookups')+((m==='gemini'||m==='api')&&cfg.live?' · live':'');b.className='badge '+(m==='none'?'bad':'ok');
+  b.textContent=(m==='gemini'?(cfg.groqKey?'Gemini + Groq':'Gemini'):m==='groq'?(cfg.geminiKey?'Groq + Gemini':'Groq'):m==='api'?'Claude API':m==='claude'?'Claude':'Set up lookups')+(['gemini','api','groq'].includes(m)&&cfg.live?' · live':'');b.className='badge '+(m==='none'?'bad':'ok');
   const n=$('#aiNote');if(n){n.hidden=m!=='none';n.innerHTML='Lookups need an AI key. Open <b>Settings</b> and paste a free Google Gemini key (takes a minute to get). Engine sketches work without one.';}}
 function parseLoose(t){if(t==null)throw new Error('Empty answer');if(typeof t==='object')return t;t=String(t);
   const fence=t.match(/```(?:json)?\s*([\s\S]*?)```/i);if(fence&&fence[1].includes('{'))t=fence[1];
@@ -90,8 +90,27 @@ async function geminiDiag(){const out=$('#sDiag');const key=$('#sGem').value.tri
     out.innerHTML=html+`<table class="xt">${rows}</table><p class="small muted">Screenshot this if lookups are still slow.</p>`;}
   catch(e){out.innerHTML=errBox(e);}
   cfg.geminiKey=prev;gList=null;}
+/* ---------- Groq (free, fast; groq/compound has built-in web search) ---------- */
+async function groqOnce(prompt,model,{maxTokens,meta},ms){const body={model,messages:[{role:'user',content:prompt}],max_tokens:maxTokens,temperature:0.2};
+  const r=await gfetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+cfg.groqKey},body:JSON.stringify(body)},ms);
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){const msg=j?.error?.message||('HTTP '+r.status);const x=new Error('Groq: '+msg);x.code=r.status===401||r.status===403?'bad_key':r.status===429?'rate_limited':'api';x.retry=parseFloat(r.headers.get('retry-after'))||0;x.daily=/per day|RPD|TPD|daily/i.test(msg);throw x;}
+  const m=j.choices?.[0]?.message||{};
+  if(meta){const urls=[];const walk=o=>{if(!o)return;if(Array.isArray(o))return o.forEach(walk);if(typeof o==='object'){if(typeof o.url==='string')urls.push({uri:o.url,title:o.title||o.url});Object.values(o).forEach(walk);}};walk(m.executed_tools);meta.sources=urls.filter((u,k,a)=>a.findIndex(t=>t.uri===u.uri)===k).slice(0,15);}
+  const t=m.content||'';if(!t){const x=new Error('Groq gave an empty answer.');x.code='empty';throw x;}return t;}
+async function groqCall(prompt,{web=false,maxTokens=8000,tier='default',meta=null}={}){
+  const models=web?['groq/compound','groq/compound-mini']:tier==='quick'?['openai/gpt-oss-20b','llama-3.3-70b-versatile']:['openai/gpt-oss-120b','llama-3.3-70b-versatile','openai/gpt-oss-20b'];
+  let last;for(const m of models){try{return await groqOnce(prompt,m,{maxTokens:Math.min(maxTokens,m.startsWith('groq/')?8000:6000),meta},web?90000:45000);}
+    catch(e){last=e;if(e.code==='bad_key'||e.code==='network')throw e;continue;}}
+  if(web&&last&&last.code!=='bad_key'){return groqCall(prompt,{web:false,maxTokens,tier,meta});}
+  throw last;}
+const FAILOVER=['rate_limited_msg','rate_limited','timeout','api','empty'];
 async function ask(prompt,o={}){await samplePromise;const m=aiMode();if(m==='none')throw{code:'nokey'};let text;
-  if(m==='gemini'){try{text=await geminiCall(prompt,o);}catch(e){if(o.web&&e.code==='api'){text=await geminiCall(prompt,{...o,web:false});}else throw e;}}
+  if(m==='gemini'){try{text=await geminiCall(prompt,o);}catch(e){
+      if(cfg.groqKey&&FAILOVER.includes(e.code)){toast('Gemini is busy, so this one is coming from Groq.');setTimeout(()=>toast(''),3500);text=await groqCall(prompt,o);}
+      else if(o.web&&e.code==='api'){text=await geminiCall(prompt,{...o,web:false});}else throw e;}}
+  else if(m==='groq'){try{text=await groqCall(prompt,o);}catch(e){
+      if(cfg.geminiKey&&FAILOVER.includes(e.code)){toast('Groq is busy, so this one is coming from Gemini.');setTimeout(()=>toast(''),3500);text=await geminiCall(prompt,o);}else throw e;}}
   else if(m==='api'){try{text=await apiCall(prompt,o);}catch(e){if(o.web&&e.code==='api'){text=await apiCall(prompt,{...o,web:false});}else throw e;}}
   else{if(o.json&&typeof sample.json==='function'){try{return parseLoose(await sample.json(prompt,{modelTier:o.tier==='quick'?'quick':'default'}));}catch(e){if(e&&e.code)throw e;}}
     const r=await sample(prompt,{modelTier:o.tier==='quick'?'quick':'default',cache:o.cache});text=r.text;}
@@ -385,7 +404,7 @@ ${refs.filter(c=>!hidden(p,c.number)).map(c=>`<div class="numrow${isPref(c.brand
 ${p.notes?`<div class="pnote">${esc(p.notes)}</div>`:''}
 <div class="plinks">Search stores: ${storeLinks(`${vshort()} ${p.position||''} ${p.name}`.replace(/\s+/g,' '))}</div>
 <div class="pact">${canVerify()&&!p.vdone?`<button class="btn sm" data-act="verify1" type="button">Verify with Google</button>`:''}${liveOn()?`<button class="btn sm" data-act="live" type="button">Find live listings</button>`:''}<button class="btn sm ghost" data-act="copy" type="button">Copy</button></div><div class="pout"></div></div>`;}
-const canVerify=()=>aiMode()==='gemini'||aiMode()==='api';
+const canVerify=()=>['gemini','api','groq'].includes(aiMode());
 function verifyPrompt(list){return `You are checking a car parts list for accuracy using web search.
 ${ctxLine()}
 For each item, search for its part numbers together with this vehicle on manufacturer catalogues and parts sites, e.g. repco.com.au, ryco.com.au, bendix.com.au, protex.com.au, permaseal.com.au, saas.com.au, wesfil.com.au, sakurafilters, ngk.com.au, narva.com.au, bendix.com.au, dba.com.au, repco.com.au, burson.com.au, supercheapauto.com.au, sparesbox.com.au, partsouq.com, amayama.com, megazip.net, and the car maker's genuine parts sites.
@@ -464,14 +483,14 @@ $('#askf').addEventListener('submit',ev=>{ev.preventDefault();const q=$('#askq')
 $$('#secnav button').forEach(b=>b.onclick=()=>document.getElementById(b.dataset.go)?.scrollIntoView({behavior:'smooth',block:'start'}));
 
 /* ---------- settings panel ---------- */
-function openSettings(){$('#sStore').value=cfg.store||'Repco';$('#sBrands').value=cfg.brands||DEFAULT_BRANDS;$('#sGem').value=cfg.geminiKey||'';$('#sSpeed').value=cfg.speed||'fast';const pv=cfg.provider||'gemini';$$('input[name=prov]').forEach(r=>r.checked=r.value===pv);provUI();$('#sKey').value=cfg.apiKey||'';$('#sModel').value=cfg.model||'claude-sonnet-5-5';$('#sLive').checked=!!cfg.live;$('#sReg').value=cfg.regcheck||'';$('#sClaude').hidden=!sample;$('#settings').hidden=false;}
+function openSettings(){$('#sGroq').value=cfg.groqKey||'';$('#sStore').value=cfg.store||'Repco';$('#sBrands').value=cfg.brands||DEFAULT_BRANDS;$('#sGem').value=cfg.geminiKey||'';$('#sSpeed').value=cfg.speed||'fast';const pv=cfg.provider||'gemini';$$('input[name=prov]').forEach(r=>r.checked=r.value===pv);provUI();$('#sKey').value=cfg.apiKey||'';$('#sModel').value=cfg.model||'claude-sonnet-5-5';$('#sLive').checked=!!cfg.live;$('#sReg').value=cfg.regcheck||'';$('#sClaude').hidden=!sample;$('#settings').hidden=false;}
 $('#setBtn').onclick=openSettings;$('#aiBadge').onclick=openSettings;
 $('#sClose').onclick=()=>$('#settings').hidden=true;
 $('#settings').addEventListener('click',e=>{if(e.target.id==='settings')$('#settings').hidden=true;});
-function provUI(){const pv=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';$('#pGem').hidden=pv!=='gemini';$('#pAnt').hidden=pv!=='anthropic';}
+function provUI(){const pv=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';$('#pGem').hidden=pv==='anthropic';$('#pAnt').hidden=pv!=='anthropic';}
 $$('input[name=prov]').forEach(r=>r.onchange=provUI);
 $('#sTest').onclick=geminiDiag;
-$('#sSave').onclick=()=>{cfg.provider=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';cfg.geminiKey=$('#sGem').value.trim();cfg.store=$('#sStore').value.trim()||'Repco';cfg.brands=$('#sBrands').value.trim()||DEFAULT_BRANDS;st.pcache={};cfg.speed=$('#sSpeed').value;gList=null;cfg.apiKey=$('#sKey').value.trim();cfg.model=$('#sModel').value;cfg.live=$('#sLive').checked;cfg.regcheck=$('#sReg').value.trim();saveCfg();$('#settings').hidden=true;};
+$('#sSave').onclick=()=>{cfg.provider=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';cfg.geminiKey=$('#sGem').value.trim();cfg.groqKey=$('#sGroq').value.trim();cfg.store=$('#sStore').value.trim()||'Repco';cfg.brands=$('#sBrands').value.trim()||DEFAULT_BRANDS;st.pcache={};cfg.speed=$('#sSpeed').value;gList=null;cfg.apiKey=$('#sKey').value.trim();cfg.model=$('#sModel').value;cfg.live=$('#sLive').checked;cfg.regcheck=$('#sReg').value.trim();saveCfg();$('#settings').hidden=true;};
 $('#sClear').onclick=()=>{cfg={};saveCfg();openSettings();};
 
 /* ---------- manual sketch + recent ---------- */

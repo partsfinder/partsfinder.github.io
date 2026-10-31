@@ -11,6 +11,6 @@ Find every part on a car by rego, VIN, model or part number. Built for Australia
 
 It's a static site (`index.html`, `style.css`, `diagram.js`, `app.js`), served by GitHub Pages.
 
-Lookups use AI. Open **Settings** and paste a **free Google Gemini key** (aistudio.google.com/apikey) or an Anthropic API key. Keys are stored only in your browser and sent directly to Google or Anthropic. Turn on **Live retailer search** to check real store listings and verify cross-references on the web.
+Lookups use AI. Open **Settings** and paste a **free Google Gemini key** (aistudio.google.com/apikey) and/or a **free Groq key** (console.groq.com/keys) as an automatic backup, or an Anthropic API key. Keys are stored only in your browser and sent directly to Google or Anthropic. Turn on **Live retailer search** to check real store listings and verify cross-references on the web.
 
 AI-generated part numbers can be wrong. Confirm by VIN before buying.

@@ -7,7 +7,7 @@
 <meta name="description" content="Find every part on your car by rego, VIN or model: OEM numbers, sizes, cross-references to Australian brands, and interactive engine diagrams.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=1793426610">
+<link rel="stylesheet" href="style.css?v=1793426707">
 </head>
 <body>
 <header class="top">
@@ -144,12 +144,15 @@
     <div class="dhead"><h3 style="margin:0">Settings</h3><button class="x" id="sClose" type="button" aria-label="Close">×</button></div>
     <p id="sClaude" class="note small" hidden>You're viewing this inside Claude, so lookups already work without a key. A key adds live retailer search.</p>
     <label class="lab" style="margin-top:12px">AI engine</label>
-    <div class="provs"><label class="check" style="margin:0"><input type="radio" name="prov" value="gemini"> Google Gemini <b style="color:var(--ok)">&nbsp;free</b></label><label class="check" style="margin:0"><input type="radio" name="prov" value="anthropic"> Anthropic Claude (paid)</label></div>
+    <div class="provs"><label class="check" style="margin:0"><input type="radio" name="prov" value="gemini"> Google Gemini <b style="color:var(--ok)">&nbsp;free</b></label><label class="check" style="margin:0"><input type="radio" name="prov" value="groq"> Groq <b style="color:var(--ok)">&nbsp;free, fastest</b></label><label class="check" style="margin:0"><input type="radio" name="prov" value="anthropic"> Anthropic Claude (paid)</label></div>
     <div id="pGem">
       <label class="lab" for="sGem" style="margin-top:12px">Gemini API key</label>
       <input id="sGem" type="password" placeholder="AIza&hellip;" style="width:100%">
       <p class="small muted">Free, no card needed: sign in at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, tap <b>Create API key</b> and paste it here. The free tier has a per-minute limit, and Google may use free-tier requests to improve its products. The key stays in this browser only.</p>
       <button class="btn sm" id="sTest" type="button">Test my key</button><div id="sDiag" style="margin:8px 0"></div>
+      <label class="lab" for="sGroq" style="margin-top:6px">Groq API key (backup)</label>
+      <input id="sGroq" type="password" placeholder="gsk_&hellip;" style="width:100%">
+      <p class="small muted">Also free, no card: sign in at <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a> and tap <b>Create API key</b>. With both keys saved, whenever one is busy or rate-limited the other takes over automatically. Groq's "Compound" model does its own web search for verified part numbers.</p>
       <label class="lab" for="sSpeed">Speed</label>
       <select id="sSpeed" style="width:100%"><option value="fast">Fast: Flash-Lite (answers in seconds)</option><option value="accurate">Accurate: Flash (slower, better part numbers)</option></select>
     </div>
@@ -174,7 +177,7 @@
   </div>
 </div>
 
-<script src="diagram.js?v=1793426610"></script>
-<script src="app.js?v=1793426610"></script>
+<script src="diagram.js?v=1793426707"></script>
+<script src="app.js?v=1793426707"></script>
 </body>
 </html>
