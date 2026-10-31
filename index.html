@@ -7,7 +7,7 @@
 <meta name="description" content="Find every part on your car by rego, VIN or model: OEM numbers, sizes, cross-references to Australian brands, and interactive engine diagrams.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=1793425111">
+<link rel="stylesheet" href="style.css?v=1793425177">
 </head>
 <body>
 <header class="top">
@@ -149,6 +149,7 @@
       <label class="lab" for="sGem" style="margin-top:12px">Gemini API key</label>
       <input id="sGem" type="password" placeholder="AIza&hellip;" style="width:100%">
       <p class="small muted">Free, no card needed: sign in at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, tap <b>Create API key</b> and paste it here. The free tier has a per-minute limit, and Google may use free-tier requests to improve its products. The key stays in this browser only.</p>
+      <button class="btn sm" id="sTest" type="button">Test my key</button><div id="sDiag" style="margin:8px 0"></div>
       <label class="lab" for="sSpeed">Speed</label>
       <select id="sSpeed" style="width:100%"><option value="fast">Fast: Flash-Lite (answers in seconds)</option><option value="accurate">Accurate: Flash (slower, better part numbers)</option></select>
     </div>
@@ -168,7 +169,7 @@
   </div>
 </div>
 
-<script src="diagram.js?v=1793425111"></script>
-<script src="app.js?v=1793425111"></script>
+<script src="diagram.js?v=1793425177"></script>
+<script src="app.js?v=1793425177"></script>
 </body>
 </html>

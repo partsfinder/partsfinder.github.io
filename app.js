@@ -40,25 +40,46 @@ async function geminiModels(){if(gList)return gList;let found=[];
       .sort((a,b)=>(/lite/.test(a)-/lite/.test(b))||(/preview/.test(a)-/preview/.test(b))||ver(b)-ver(a));}
   catch(e){if(e.code==='bad_key')throw e;}
   const lites=found.filter(n=>/lite/.test(n)&&!/preview/.test(n)).slice(0,2);gList=[...new Set([cfg.gModel,...found.filter(n=>!/lite/.test(n)).slice(0,4),...GEM_MODELS,...lites].filter(Boolean))];return gList;}
+const gSlow=new Set();
+function gBody(prompt,m,{web,maxTokens,think}){const gc={maxOutputTokens:maxTokens};if(think)gc.thinkingConfig=/gemini-2\./.test(m)?{thinkingBudget:512}:{thinkingLevel:'low'};
+  const body={contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:gc};if(web)body.tools=[{google_search:{}}];return body;}
+async function geminiOnce(prompt,m,o,ms){let think=!cfg.gNoThink;
+  for(let attempt=0;attempt<2;attempt++){
+    const r=await gfetch(`${GBASE}/models/${m}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':cfg.geminiKey},body:JSON.stringify(gBody(prompt,m,{...o,think}))},ms);
+    const j=await r.json().catch(()=>({}));
+    if(r.ok){const c=j.candidates?.[0];const t=(c?.content?.parts||[]).filter(p=>p.text&&!p.thought).map(p=>p.text).join('');
+      if(!t){const x=new Error(c?.finishReason?`No answer (${c.finishReason}).`:(j.promptFeedback?.blockReason?`Blocked (${j.promptFeedback.blockReason}).`:'Empty answer.'));x.code='empty';throw x;}return t;}
+    const msg=j?.error?.message||('HTTP '+r.status);
+    if(r.status===400&&think&&/think/i.test(msg)){think=false;cfg.gNoThink=true;saveCfg();continue;}
+    const x=new Error(msg);x.status=r.status;x.code=(r.status===401||r.status===403||(r.status===400&&/api key/i.test(msg)))?'bad_key':r.status===429?'rate_limited':'api';throw x;}}
 async function geminiCall(prompt,{web=false,maxTokens=16000,tier='default'}={}){const all=await geminiModels();const fast=tier==='quick'||(tier==='parts'&&(cfg.speed||'fast')==='fast');
-  const list=fast?[...all.filter(m=>/lite/.test(m)),...all.filter(m=>!/lite/.test(m))]:all;let last;
-  for(const m of list){let think=!cfg.gNoThink;
-    for(let attempt=0;attempt<2;attempt++){
-      const gc={maxOutputTokens:maxTokens};if(think)gc.thinkingConfig=/gemini-2\./.test(m)?{thinkingBudget:1024}:{thinkingLevel:'low'};
-      const body={contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:gc};if(web)body.tools=[{google_search:{}}];
-      const r=await gfetch(`${GBASE}/models/${m}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':cfg.geminiKey},body:JSON.stringify(body)},web?120000:90000);
-      const j=await r.json().catch(()=>({}));
-      if(r.ok){if(!/lite/.test(m)&&cfg.gModel!==m){cfg.gModel=m;saveCfg();}const c=j.candidates?.[0];const t=(c?.content?.parts||[]).filter(p=>p.text&&!p.thought).map(p=>p.text).join('');
-        if(!t)throw new Error(c?.finishReason?`No answer (${c.finishReason}). Try again or reword it.`:(j.promptFeedback?.blockReason?`Blocked (${j.promptFeedback.blockReason}).`:'Empty answer, try again.'));return t;}
-      const msg=j?.error?.message||('HTTP '+r.status);
-      if(r.status===400&&think&&/think/i.test(msg)){think=false;cfg.gNoThink=true;saveCfg();continue;}
-      last=new Error(msg);last.code=(r.status===401||r.status===403||(r.status===400&&/api key/i.test(msg)))?'bad_key':r.status===429?'rate_limited':'api';
-      break;}
-    if(!last)continue;
-    if(last.code==='bad_key')throw last;
-    if(/not found|not supported|limit: ?0|free.?tier|overloaded|unavailable|503|404/i.test(last.message)){if(cfg.gModel===m)cfg.gModel='';last=null;continue;}
-    throw last;}
+  let list=fast?[...all.filter(m=>/lite/.test(m)),...all.filter(m=>!/lite/.test(m))]:all;
+  list=[...list.filter(m=>!gSlow.has(m)),...list.filter(m=>gSlow.has(m))];
+  const ms=web?100000:tier==='quick'?25000:60000;let last=null,tries=0;
+  for(const m of list){if(tries>=4)break;tries++;
+    try{const t=await geminiOnce(prompt,m,{web,maxTokens},ms);gSlow.delete(m);if(!/lite/.test(m)&&cfg.gModel!==m){cfg.gModel=m;saveCfg();}return t;}
+    catch(e){last=e;
+      if(e.code==='bad_key'||e.code==='network')throw e;
+      if(e.code==='timeout'){gSlow.add(m);continue;}
+      if(e.code==='empty')continue;
+      if(e.code==='rate_limited'&&!/limit: ?0|free.?tier|quota/i.test(e.message))throw e;
+      if(cfg.gModel===m)cfg.gModel='';continue;}}
+  if(last&&last.code==='timeout'){last.message='Every Gemini model on your key was too slow just now. Open Settings and tap Test my key, then send me a screenshot.';}
   throw last||new Error('No Gemini model on your key could answer. Try again in a minute.');}
+async function geminiDiag(){const out=$('#sDiag');const key=$('#sGem').value.trim();if(!key){out.innerHTML='<div class="errbox">Paste your key first.</div>';return;}
+  const prev=cfg.geminiKey;cfg.geminiKey=key;gList=null;out.innerHTML=skel('Checking your key…');let html='';
+  try{const t0=Date.now();const r=await gfetch(`${GBASE}/models?pageSize=200`,{headers:{'x-goog-api-key':key}},15000);const j=await r.json().catch(()=>({}));
+    if(!r.ok){out.innerHTML=`<div class="errbox">Key check failed (${r.status}): ${esc(j?.error?.message||'')}</div>`;cfg.geminiKey=prev;return;}
+    const names=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>m.name.replace('models/',''));
+    html+=`<p class="small">✅ Key works (${Date.now()-t0} ms). ${names.length} models available.</p>`;out.innerHTML=html+skel('Timing models…');
+    const list=await geminiModels();const pick=[...list.filter(m=>/lite/.test(m)).slice(0,2),...list.filter(m=>!/lite/.test(m)).slice(0,3)];
+    let rows='';for(const m of pick){const t1=Date.now();let res;
+      try{await geminiOnce('Reply with just the word OK.',m,{web:false,maxTokens:200},20000);res=`<span style="color:var(--ok)">${((Date.now()-t1)/1000).toFixed(1)} s</span>`;}
+      catch(e){res=`<span class="errbox">${esc(e.code==='timeout'?'over 20 s':(e.message||'').slice(0,90))}</span>`;}
+      rows+=`<tr><td><code>${esc(m)}</code></td><td>${res}</td></tr>`;out.innerHTML=html+`<table class="xt">${rows}</table>`+skel('Timing models…');}
+    out.innerHTML=html+`<table class="xt">${rows}</table><p class="small muted">Screenshot this if lookups are still slow.</p>`;}
+  catch(e){out.innerHTML=errBox(e);}
+  cfg.geminiKey=prev;gList=null;}
 async function ask(prompt,o={}){await samplePromise;const m=aiMode();if(m==='none')throw{code:'nokey'};let text;
   if(m==='gemini'){try{text=await geminiCall(prompt,o);}catch(e){if(o.web&&e.code==='api'){text=await geminiCall(prompt,{...o,web:false});}else throw e;}}
   else if(m==='api'){try{text=await apiCall(prompt,o);}catch(e){if(o.web&&e.code==='api'){text=await apiCall(prompt,{...o,web:false});}else throw e;}}
@@ -312,6 +333,7 @@ $('#sClose').onclick=()=>$('#settings').hidden=true;
 $('#settings').addEventListener('click',e=>{if(e.target.id==='settings')$('#settings').hidden=true;});
 function provUI(){const pv=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';$('#pGem').hidden=pv!=='gemini';$('#pAnt').hidden=pv!=='anthropic';}
 $$('input[name=prov]').forEach(r=>r.onchange=provUI);
+$('#sTest').onclick=geminiDiag;
 $('#sSave').onclick=()=>{cfg.provider=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';cfg.geminiKey=$('#sGem').value.trim();cfg.speed=$('#sSpeed').value;gList=null;cfg.apiKey=$('#sKey').value.trim();cfg.model=$('#sModel').value;cfg.live=$('#sLive').checked;cfg.regcheck=$('#sReg').value.trim();saveCfg();$('#settings').hidden=true;};
 $('#sClear').onclick=()=>{cfg={};saveCfg();openSettings();};
 
