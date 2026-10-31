@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PartsFinder</title>
+<meta name="description" content="Find every part on your car by rego, VIN or model: OEM numbers, sizes, cross-references to Australian brands, and interactive engine diagrams.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=1793438307">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><circle cx="17" cy="17" r="11" fill="none" stroke="#f5a524" stroke-width="3"/><path d="M17 9 l2.2 4.5 4.8.6-3.5 3.3.9 4.8-4.4-2.4-4.4 2.4.9-4.8-3.5-3.3 4.8-.6z" fill="#b9c2cd"/><line x1="25" y1="25" x2="35" y2="35" stroke="#f5a524" stroke-width="4" stroke-linecap="round"/></svg>
+    <div><h1>Parts<span>Finder</span></h1><p>Every part on your car, by rego, VIN or model</p></div>
+  </div>
+  <div class="hright"><button id="aiBadge" class="badge" type="button">…</button><button id="setBtn" class="iconbtn" type="button" aria-label="Settings">⚙</button></div>
+</header>
+<main>
+  <section class="card">
+    <div class="tabs" id="findTabs">
+      <button data-t="veh" class="on" type="button">Vehicle</button>
+      <button data-t="vin" type="button">VIN</button>
+      <button data-t="rego" type="button">Rego</button>
+      <button data-t="pn" type="button">Part number</button>
+    </div>
+
+    <form id="fVeh" class="fpane" data-t="veh" autocomplete="off">
+      <label class="lab" for="q">Year, make, model</label>
+      <div class="row"><input id="q" type="text" placeholder="e.g. 2016 Toyota Hilux SR5 2.8 diesel"><button class="btn primary" type="submit">Find</button></div>
+      <details class="more"><summary>Know the engine? Add a hint (optional)</summary><input id="hint" type="text" placeholder="e.g. 1GD-FTV, 2.0 turbo, LS3"></details>
+    </form>
+
+    <form id="fVin" class="fpane" data-t="vin" autocomplete="off" hidden>
+      <label class="lab" for="vin">VIN (17 characters) <span id="vinCount" class="muted">0/17</span></label>
+      <div class="row"><input id="vin" type="text" maxlength="20" placeholder="e.g. MR0HA3CD100123456" style="font-family:'IBM Plex Mono',monospace;letter-spacing:.06em"><button class="btn primary" type="submit">Decode</button></div>
+      <div id="vinMsg" class="small errbox"></div>
+    </form>
+
+    <form id="fRego" class="fpane" data-t="rego" autocomplete="off" hidden>
+      <label class="lab" for="plate">Registration plate</label>
+      <div class="row">
+        <select id="state" style="flex:0 0 96px"><option>QLD</option><option>NSW</option><option>VIC</option><option>SA</option><option>WA</option><option>TAS</option><option>ACT</option><option>NT</option></select>
+        <input id="plate" type="text" placeholder="e.g. 123ABC" style="text-transform:uppercase;font-family:'IBM Plex Mono',monospace">
+        <button class="btn primary" type="submit">Look up</button>
+      </div>
+      <div id="regoOut"></div>
+    </form>
+
+    <form id="fPn" class="fpane" data-t="pn" autocomplete="off" hidden>
+      <label class="lab" for="pn">OEM or aftermarket part number</label>
+      <div class="row"><input id="pn" type="text" placeholder="e.g. 90915-YZZD2, Z436, 04465-0K290, H11" style="font-family:'IBM Plex Mono',monospace"><button class="btn primary" type="submit">Cross-reference</button></div>
+      <input id="pnVeh" type="text" placeholder="Vehicle (optional, improves accuracy)" style="width:100%;margin-top:8px">
+      <div id="pnOut"></div>
+    </form>
+
+    <div id="recent" class="chips"></div>
+    <div id="aiNote" class="note" hidden></div>
+    <button class="linkbtn" id="manualBtn" type="button">Or sketch an engine layout yourself</button>
+    <div id="manual" class="manual" hidden>
+      <label>Layout<select id="mLayout"><option value="inline">Inline</option><option value="V">V</option><option value="flat">Flat / boxer</option><option value="rotary">Rotary</option><option value="electric">Electric</option></select></label>
+      <label>Cylinders<select id="mCyl"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>8</option><option>10</option><option>12</option></select></label>
+      <label>Valvetrain<select id="mVt"><option>DOHC</option><option>SOHC</option><option>OHV</option></select></label>
+      <label>Induction<select id="mAsp"><option value="NA">Natural</option><option value="turbo">Turbo</option><option value="twin-turbo">Twin-turbo</option><option value="supercharged">Supercharged</option></select></label>
+      <label>Fuel<select id="mFuel"><option>petrol</option><option>diesel</option></select></label>
+      <label>Injection<select id="mInj"><option value="port">Port</option><option value="direct">Direct</option><option value="dual">Dual</option></select></label>
+      <label>Timing<select id="mTd"><option>chain</option><option>belt</option></select></label>
+      <label>&nbsp;<button class="btn" id="mdraw" type="button">Draw it</button></label>
+    </div>
+  </section>
+
+  <div id="status"></div>
+
+  <section id="choose" class="card" hidden>
+    <h3 id="chooseTitle">Which engine?</h3>
+    <p id="chooseMsg" class="muted small" style="margin:-4px 0 10px"></p>
+    <div id="engList" class="engs"></div>
+  </section>
+
+  <div id="result" hidden>
+    <div class="titlebar">
+      <div class="eyebrow" id="rMarket"></div>
+      <h2 id="rTitle"></h2>
+      <div id="rIds" class="small muted" style="margin-top:4px"></div>
+      <p id="rOverview"></p>
+    </div>
+    <nav class="secnav" id="secnav">
+      <button class="ai" data-go="sec-parts">Parts</button>
+      <button class="ai" data-go="sec-diagrams">Diagrams</button>
+      <button data-go="sec-diagram">Engine (generic)</button>
+      <button class="ai" data-go="sec-specs">Specs</button>
+      <button class="ai" data-go="sec-service">Fluids &amp; service</button>
+      <button class="ai" data-go="sec-issues">Known issues</button>
+      <button class="ai" data-go="sec-links">Catalogues</button>
+      <button class="ai" data-go="sec-ask">Ask</button>
+    </nav>
+
+    <section class="card ai" id="sec-parts">
+      <h3>Find parts for this car</h3>
+      <form id="psf" class="row" autocomplete="off"><input id="psq" type="text" placeholder="Any part, size or abbreviation: H7, LCA, W/B, 15A fuse, door trim clip"><button class="btn primary" type="submit">Search</button></form>
+      <div id="abbrHint" class="small" style="color:#ffd58a;margin-top:6px"></div>
+      <div id="repcoPanel"></div>
+      <div id="cats" class="cats"></div>
+      <div id="presults"></div>
+    </section>
+
+    <section class="card ai" id="sec-diagrams">
+      <h3>Diagrams for this vehicle</h3>
+      <div id="dgChips" class="chips"></div>
+      <div id="dgList" class="dgrid"></div>
+      <div id="dgFind"></div>
+    </section>
+
+    <section class="card" id="sec-diagram">
+      <h3>Engine diagram <span class="small muted" style="font-family:var(--body,inherit);font-size:13px;font-weight:400">generic, drawn from the engine layout, not factory</span></h3>
+      <div class="tabs" id="viewTabs">
+        <button data-v="section" class="on" type="button">Cross-section</button>
+        <button data-v="top" type="button">Top layout</button>
+        <button data-v="front" type="button">Timing &amp; belts</button>
+      </div>
+      <div class="stage" id="stage"><div id="svgwrap"></div><div id="tip" class="tip"></div></div>
+      <div class="controls">
+        <button id="play" class="btn sm" type="button">Pause</button>
+        <label>Speed <input type="range" id="speed" min="2" max="100" value="35"></label>
+        <span id="stroke" class="mono"></span>
+      </div>
+      <div class="chips" id="compChips"></div>
+      <div id="detail" class="detail"></div>
+      <p class="warn">Drawn from this engine's layout and specs (cylinder arrangement, valvetrain, induction, timing drive). It shows how the engine is built, not factory dimensions. For OEM exploded diagrams, see Catalogues.</p>
+    </section>
+
+    <section class="card ai" id="sec-specs"><h3>Engine specifications</h3><div id="specs"></div><div id="uncertain" class="warn"></div></section>
+    <section class="card ai" id="sec-service"><h3>Fluids &amp; service</h3><div id="fluids"></div><h4>Service intervals</h4><div id="service"></div><h4>Torque specs</h4><div id="torque"></div></section>
+    <section class="card ai" id="sec-issues"><h3>Known issues</h3><div id="issues"></div></section>
+    <section class="card ai" id="sec-links">
+      <h3>Catalogues &amp; real diagrams</h3>
+      <p class="muted small" style="margin-top:-4px">Genuine exploded diagrams and exact part numbers live in OEM catalogues. A VIN gives the most accurate match.</p>
+      <div id="links" class="links"></div>
+    </section>
+    <section class="card ai" id="sec-ask">
+      <h3>Ask about this car</h3>
+      <form id="askf" autocomplete="off"><input id="askq" type="text" placeholder="e.g. What's the wheel nut torque? How do I get the headlight globe out?"><button class="btn primary" type="submit">Ask</button></form>
+      <div id="ans" class="answer"></div>
+    </section>
+  </div>
+
+  <footer>Part numbers, sizes and cross-references are written by AI (Google Gemini or Anthropic Claude) from what it knows about each vehicle and can be wrong or out of date, especially around model-year and build-date splits. Confirm by VIN with a parts counter or OEM catalogue before you buy, and check torque figures against a workshop manual. Store links open searches; PartsFinder has no affiliation with any retailer.</footer>
+</main>
+
+<div id="settings" class="overlay" hidden>
+  <div class="dialog card" role="dialog" aria-label="Settings">
+    <div class="dhead"><h3 style="margin:0">Settings</h3><button class="x" id="sClose" type="button" aria-label="Close">×</button></div>
+    <p id="sClaude" class="note small" hidden>You're viewing this inside Claude, so lookups already work without a key. A key adds live retailer search.</p>
+    <label class="lab" style="margin-top:12px">AI engine</label>
+    <div class="provs"><label class="check" style="margin:0"><input type="radio" name="prov" value="gemini"> Google Gemini <b style="color:var(--ok)">&nbsp;free</b></label><label class="check" style="margin:0"><input type="radio" name="prov" value="groq"> Groq <b style="color:var(--ok)">&nbsp;free, fastest</b></label><label class="check" style="margin:0"><input type="radio" name="prov" value="anthropic"> Anthropic Claude (paid)</label></div>
+    <div id="pGem">
+      <label class="lab" for="sGem" style="margin-top:12px">Gemini API key</label>
+      <input id="sGem" type="password" placeholder="AIza&hellip;" style="width:100%">
+      <p class="small muted">Free, no card needed: sign in at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, tap <b>Create API key</b> and paste it here. The free tier has a per-minute limit, and Google may use free-tier requests to improve its products. The key stays in this browser only.</p>
+      <button class="btn sm" id="sTest" type="button">Test my key</button><div id="sDiag" style="margin:8px 0"></div>
+      <label class="lab" for="sGroq" style="margin-top:6px">Groq API key (backup)</label>
+      <input id="sGroq" type="password" placeholder="gsk_&hellip;" style="width:100%">
+      <p class="small muted">Also free, no card: sign in at <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a> and tap <b>Create API key</b>. With both keys saved, whenever one is busy or rate-limited the other takes over automatically. Groq's "Compound" model does its own web search for verified part numbers.</p>
+      <label class="lab" for="sSpeed">Speed</label>
+      <select id="sSpeed" style="width:100%"><option value="fast">Fast: Flash-Lite (answers in seconds)</option><option value="accurate">Accurate: Flash (slower, better part numbers)</option></select>
+    </div>
+    <div id="pAnt" hidden>
+      <label class="lab" for="sKey" style="margin-top:12px">Anthropic API key</label>
+      <input id="sKey" type="password" placeholder="sk-ant-&hellip;" style="width:100%">
+      <p class="small muted">Pay-as-you-go from console.anthropic.com. Kept only in this browser.</p>
+      <label class="lab" for="sModel">Model</label>
+      <select id="sModel" style="width:100%"><option value="claude-sonnet-5-5">Claude Sonnet 5.5 (recommended)</option><option value="claude-opus-5-5">Claude Opus 5.5 (most thorough, slower)</option><option value="claude-haiku-5-5">Claude Haiku 5.5 (fastest, cheapest)</option></select>
+    </div>
+    <label class="lab" for="sStore" style="margin-top:12px">My parts store</label>
+    <select id="sStore" style="width:100%"><option>Repco</option><option>Supercheap</option><option>Autobarn</option><option>Burson</option><option>Sparesbox</option><option>Autopro</option></select>
+    <label class="lab" for="sBrands" style="margin-top:12px">Preferred brands (listed first)</label>
+    <textarea id="sBrands" rows="2" style="width:100%"></textarea>
+    <p class="small muted">Cross-references try these brands first and tag them as stocked by your store.</p>
+    <label class="lab" for="sRules" style="margin-top:12px">Number rules</label>
+    <textarea id="sRules" rows="6" style="width:100%;font-family:'IBM Plex Mono',monospace;font-size:13px" placeholder="Repco, Permaseal: rocker cover gasket|valve cover gasket = RC"></textarea>
+    <p class="small muted">One per line: <code>Brand, Brand: part word = PREFIX, PREFIX</code>. Numbers that don't match are thrown out. Use | for alternative part names. Example: <code>Ryco: oil filter = Z</code></p>
+    <label class="check"><input id="sLive" type="checkbox"> Live retailer search: checks real Repco, Supercheap, Burson and other listings on the web and verifies cross-references (slower; free on Gemini up to 5,000 searches a month)</label>
+    <details class="more"><summary>Advanced: automatic rego lookup (paid service, optional)</summary>
+      <input id="sReg" type="text" placeholder="RegCheck username" style="width:100%;margin-top:8px">
+      <p class="small muted">Only needed if you want plates turned into VINs with no extra step. The free Rego tab works without it.</p>
+    </details>
+    <div class="row" style="margin-top:12px"><button class="btn primary" id="sSave" type="button">Save</button><button class="btn ghost" id="sClear" type="button">Clear all</button></div>
+  </div>
+</div>
+
+<script src="diagram.js?v=1793438307"></script>
+<script src="app.js?v=1793438307"></script>
+</body>
+</html>
