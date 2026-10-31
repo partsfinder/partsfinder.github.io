@@ -24,19 +24,40 @@ async function apiCall(prompt,{web=false,maxTokens=12000}={}){
   const j=await r.json().catch(()=>({}));
   if(!r.ok){const x=new Error(j?.error?.message||('HTTP '+r.status));x.code=r.status===429||r.status===529?'rate_limited':r.status===401||r.status===403?'bad_key':'api';throw x;}
   return(j.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');}
-const GEM_MODELS=['gemini-flash-latest','gemini-3.7-flash','gemini-3.6-flash','gemini-3.5-flash','gemini-3-flash-preview','gemini-2.5-flash'];
-async function geminiCall(prompt,{web=false,maxTokens=24000}={}){const list=[...new Set([cfg.gModel,...GEM_MODELS].filter(Boolean))];let last;
-  for(const m of list){const body={contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:maxTokens}};if(web)body.tools=[{google_search:{}}];
-    let r;try{r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':cfg.geminiKey},body:JSON.stringify(body)});}
-    catch(e){const x=new Error('Couldn’t reach the Gemini API from this page.');x.code='network';throw x;}
-    const j=await r.json().catch(()=>({}));
-    if(r.ok){if(cfg.gModel!==m){cfg.gModel=m;saveCfg();}const c=j.candidates?.[0];const t=(c?.content?.parts||[]).filter(p=>p.text&&!p.thought).map(p=>p.text).join('');
-      if(!t)throw new Error(c?.finishReason?`No answer (${c.finishReason}). Try again or reword the search.`:'Empty answer');return t;}
-    const msg=j?.error?.message||('HTTP '+r.status);last=new Error(msg);
-    last.code=(r.status===401||r.status===403||(r.status===400&&/api key/i.test(msg)))?'bad_key':r.status===429?'rate_limited':'api';
-    if(r.status===404||(r.status===429&&/limit: ?0|free.?tier/i.test(msg))){if(cfg.gModel===m){cfg.gModel='';}continue;}
+const GEM_MODELS=['gemini-flash-latest','gemini-3.7-flash','gemini-3.6-flash','gemini-3.5-flash','gemini-3-flash-preview','gemini-2.5-flash','gemini-flash-lite-latest'];
+const GBASE='https://generativelanguage.googleapis.com/v1beta';
+async function gfetch(url,opt,ms){const ac=new AbortController();const t=setTimeout(()=>ac.abort(),ms);
+  try{return await fetch(url,{...opt,signal:ac.signal});}
+  catch(e){const x=new Error(e.name==='AbortError'?'Gemini took too long to answer. Try again; the free tier is sometimes slow at busy times.':'Couldn’t reach the Gemini API from this page. Check your connection.');x.code=e.name==='AbortError'?'timeout':'network';throw x;}
+  finally{clearTimeout(t);}}
+let gList=null;
+async function geminiModels(){if(gList)return gList;let found=[];
+  try{const r=await gfetch(`${GBASE}/models?pageSize=200`,{headers:{'x-goog-api-key':cfg.geminiKey}},15000);const j=await r.json();
+    if(r.status===400||r.status===401||r.status===403){const x=new Error(j?.error?.message||'Key rejected');x.code='bad_key';throw x;}
+    const ver=n=>parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/)||[])[1]||0);
+    found=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>m.name.replace(/^models\//,''))
+      .filter(n=>/flash/.test(n)&&!/image|tts|audio|live|embed|thinking-exp|exp-/.test(n))
+      .sort((a,b)=>(/lite/.test(a)-/lite/.test(b))||(/preview/.test(a)-/preview/.test(b))||ver(b)-ver(a));}
+  catch(e){if(e.code==='bad_key')throw e;}
+  gList=[...new Set([cfg.gModel,...found.slice(0,4),...GEM_MODELS].filter(Boolean))];return gList;}
+async function geminiCall(prompt,{web=false,maxTokens=16000}={}){const list=await geminiModels();let last;
+  for(const m of list){let think=!cfg.gNoThink;
+    for(let attempt=0;attempt<2;attempt++){
+      const gc={maxOutputTokens:maxTokens};if(think)gc.thinkingConfig=/gemini-2\./.test(m)?{thinkingBudget:1024}:{thinkingLevel:'low'};
+      const body={contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:gc};if(web)body.tools=[{google_search:{}}];
+      const r=await gfetch(`${GBASE}/models/${m}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':cfg.geminiKey},body:JSON.stringify(body)},web?120000:90000);
+      const j=await r.json().catch(()=>({}));
+      if(r.ok){if(cfg.gModel!==m){cfg.gModel=m;saveCfg();}const c=j.candidates?.[0];const t=(c?.content?.parts||[]).filter(p=>p.text&&!p.thought).map(p=>p.text).join('');
+        if(!t)throw new Error(c?.finishReason?`No answer (${c.finishReason}). Try again or reword it.`:(j.promptFeedback?.blockReason?`Blocked (${j.promptFeedback.blockReason}).`:'Empty answer, try again.'));return t;}
+      const msg=j?.error?.message||('HTTP '+r.status);
+      if(r.status===400&&think&&/think/i.test(msg)){think=false;cfg.gNoThink=true;saveCfg();continue;}
+      last=new Error(msg);last.code=(r.status===401||r.status===403||(r.status===400&&/api key/i.test(msg)))?'bad_key':r.status===429?'rate_limited':'api';
+      break;}
+    if(!last)continue;
+    if(last.code==='bad_key')throw last;
+    if(/not found|not supported|limit: ?0|free.?tier|overloaded|unavailable|503|404/i.test(last.message)){if(cfg.gModel===m)cfg.gModel='';last=null;continue;}
     throw last;}
-  throw last;}
+  throw last||new Error('No Gemini model on your key could answer. Try again in a minute.');}
 async function ask(prompt,o={}){await samplePromise;const m=aiMode();if(m==='none')throw{code:'nokey'};let text;
   if(m==='gemini'){try{text=await geminiCall(prompt,o);}catch(e){if(o.web&&e.code==='api'){text=await geminiCall(prompt,{...o,web:false});}else throw e;}}
   else if(m==='api'){try{text=await apiCall(prompt,o);}catch(e){if(o.web&&e.code==='api'){text=await apiCall(prompt,{...o,web:false});}else throw e;}}
@@ -47,11 +68,13 @@ function errMsg(e){if(!e)return'Something went wrong.';
   if(e.code==='nokey')return'No AI key set up yet. Open Settings and paste your free Gemini key.';
   if(e.code==='bad_key')return'The API key was rejected. Check it in Settings.';
   if(e.code==='not_granted')return'Claude access wasn’t allowed for this page. Allow it, or add an API key in Settings.';
+  if(e.code==='timeout'||e.code==='network')return e.message;
   if(e.code==='rate_limited')return'Hit the speed limit for your key. Wait a minute and try again.';
   return'Lookup failed: '+(e.message||String(e));}
 const errBox=e=>`<div class="errbox">${esc(errMsg(e))}${e&&(e.code==='nokey'||e.code==='bad_key')?' <button class="linkbtn" data-open-settings type="button">Open settings</button>':''}</div>`;
 const skel=t=>`<div class="skel"><span class="spin"></span>${esc(t)}</div>`;
-function status(html,loading,err){const el=$('#status');if(!html){el.innerHTML='';return;}el.innerHTML=`<div class="card st ${err?'err':''}">${loading?'<span class="spin"></span>':''}<span>${html}</span></div>`;}
+let stTimer=null;function status(html,loading,err){clearInterval(stTimer);const el=$('#status');if(!html){el.innerHTML='';return;}el.innerHTML=`<div class="card st ${err?'err':''}">${loading?'<span class="spin"></span>':''}<span>${html}</span>${loading?'<span class="mono muted" id="stSecs" style="margin-left:auto"></span>':''}</div>`;
+  if(loading){const t0=Date.now();stTimer=setInterval(()=>{const e=$('#stSecs');if(!e){clearInterval(stTimer);return;}const s=Math.round((Date.now()-t0)/1000);e.textContent=s+'s';},1000);}}
 document.addEventListener('click',e=>{if(e.target.closest('[data-open-settings]'))openSettings();});
 
 /* ---------- vocab ---------- */
