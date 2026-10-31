@@ -538,7 +538,8 @@ function parseRepcoHTML(txt,fname){const doc=new DOMParser().parseFromString(txt
   return{vehicle,source:canon||fname,date:new Date().toISOString().slice(0,10),items,pdp:!!pdp};}
 function allRepcoItems(){const out=[];loadRepco().forEach(pg=>pg.items.forEach(it=>out.push({...it,vehicle:pg.vehicle})));return out;}
 function vehMatch(label){const v=st.vehicle;if(!v||v.manual||!label)return false;const hay=`${v.vehicle} ${v.year||''} ${v.make||''} ${v.model||''}`.toLowerCase();const toks=label.toLowerCase().split(/\s+/).filter(t=>t.length>1);return toks.length>0&&toks.every(t=>hay.includes(t));}
-function repcoForVehicle(state='yes'){const out=[];allRepcoItems().forEach(it=>{if(it.fits===state&&vehMatch(it.vehicle)&&!out.some(o=>o.sku===it.sku))out.push(it);});return out;}
+function repcoForVehicle(state='yes'){const best={};allRepcoItems().forEach(it=>{if(it.fits==='unknown'||it.fits===undefined||!vehMatch(it.vehicle))return;const sp=(it.vehicle||'').split(/\s+/).length;const cur=best[it.sku];if(!cur||sp>cur.sp)best[it.sku]={...it,sp};});
+  return Object.values(best).filter(i=>i.fits===state);}
 const KEYW=['brake','front','rear','oil','air','cabin','fuel','filter','pad','pads','rotor','disc','caliper','wiper','blade','refill','water','pump','alternator','starter','radiator','belt','tensioner','sensor','knock','speed','headlight','clutch','bearing','shock','absorber','gasket','valve','suction','overflow','bottle','tank','kit','seal','spark','glow','plug','globe','battery','hose','thermostat','mount','link','joint'];
 const DISTINCT=['alternator','starter','radiator','tensioner','clutch','headlight','caliper','rotor','absorber','thermostat','battery'];
 function repcoMatches(p,list){const nw=(p.name||'').toLowerCase().split(/[^a-z]+/).filter(w=>KEYW.includes(w));if(!nw.length)return[];
