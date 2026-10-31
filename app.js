@@ -125,9 +125,13 @@ const qv=s=>encodeURIComponent(s);
 const gsite=(q,d)=>`https://www.google.com/search?q=${qv(q+' site:'+d)}`;
 const ebay=q=>`https://www.ebay.com.au/sch/i.html?_nkw=${qv(q)}`;
 const lnk=(u,t)=>`<a href="${esc(u)}" target="_blank" rel="noopener">${t}</a>`;
-function storeLinks(q,few){const s=few?STORES.slice(0,3):STORES;return s.map(([n,d])=>lnk(gsite(q,d),n)).join('')+lnk(ebay(q),'eBay');}
+function storeLinks(q,few){const pref=(cfg.store||'Repco').toLowerCase();const ord=[...STORES].sort((x,y)=>(y[0].toLowerCase()===pref)-(x[0].toLowerCase()===pref));const s=few?ord.slice(0,3):ord;return s.map(([n,d])=>lnk(gsite(q,d),n)).join('')+lnk(ebay(q),'eBay');}
 const vshort=()=>{const v=st.vehicle||{};return[v.year,v.make,v.model].filter(Boolean).join(' ')||v.vehicle||'';};
 
+const DEFAULT_BRANDS='Ryco, Repco, ProSelect, Protex, Bendix, SAAS, Permaseal';
+const prefBrands=()=>(cfg.brands||DEFAULT_BRANDS).split(/[,\n]/).map(x=>x.trim()).filter(Boolean);
+const isPref=b=>{const n=normN(b);return!!n&&prefBrands().some(x=>{const y=normN(x);return n===y||n.startsWith(y);});};
+function brandRule(){const b=prefBrands();return b.length?`PRIORITY BRANDS: the customer shops at ${cfg.store||'Repco'}, which stocks ${b.join(', ')}. For every part where one of these brands makes an equivalent, list that brand's number FIRST in crossRefs with "store":"${cfg.store||'Repco'}" (e.g. Ryco for filters, Bendix or Protex for brakes, Permaseal for gaskets, SAAS for accessories and electrical, Repco or ProSelect own-brand where they exist). Other brands can follow.`:'';}
 /* ---------- prompts ---------- */
 function ctxLine(){const v=st.vehicle,e=st.engine;return `Vehicle: ${v.vehicle}${v.market?` (${v.market} market)`:''}${v.vinStr?`. VIN: ${v.vinStr}`:''}${v.rego?`. Rego: ${v.rego}`:''}. Engine: ${e?.label||'unknown'}${e?.code?` [${e.code}]`:''}.`;}
 function ctx(){return ctxLine()+` Known engine data: ${JSON.stringify(st.spec?.engine||{})}`;}
@@ -160,6 +164,7 @@ For every part give:
 - "oem": genuine part number(s) as an array. Include a number ONLY if you have actually seen it listed for this vehicle; otherwise an empty array. Never guess or construct numbers.
 - "specs": the details a counter person checks, as key-value pairs. E.g. thread size and pitch, length, diameter, hole size, globe type/base/wattage/voltage, fuse rating/type/position, wiper length in mm and inches plus connector, capacity, CCA, viscosity, dimensions.
 - "crossRefs": aftermarket equivalents commonly stocked in Australia (brands such as Narva, OEX, Projecta, Philips, Osram, Hella, Ryco, Wesfil, Sakura, NGK, Denso, Bosch, Bendix, DBA, RDA, Protex, Gates, Dayco, Mackay, KYB, Monroe, Pedders, Tridon, Bosal, Valeo, Trico, Exedy, Repco own brand), as {"brand","number","store":"where it is usually sold, e.g. Repco / Burson / Supercheap","notes"}. Only numbers you are confident of. Never build a number from a pattern or guess one that looks right: an empty list is better than a wrong number, because every number is checked against the web afterwards and false ones are flagged to the customer.
+${brandRule()}
 Return ONLY JSON:
 {"interpreted":"one line on how you read the request","items":[{"name":"","position":"","oem":[],"specs":{},"qty":"","crossRefs":[],"notes":"","confidence":"high|medium|low"}],"tips":"optional short note, e.g. check build date or VIN for a split"}`;}
 function xrefPrompt(num,veh){return `You are an expert parts interpreter in Australia. Cross-reference this part number.
@@ -167,6 +172,7 @@ Part number: "${num}"${veh?`\nVehicle context: ${veh}`:''}
 Work out what the part is and which brand the number belongs to (a car maker's genuine number, or an aftermarket brand such as Ryco, Wesfil, Narva, OEX, NGK, Bendix). Then give cross-references:
 - Other genuine numbers (supersessions or the same part from sister brands).
 - Aftermarket equivalents stocked in Australia, e.g. OEM > Ryco/Wesfil/Sakura for filters, OEM > Narva/Philips/OEX for globes and electrical, OEM > Bendix/DBA/RDA for brakes, OEM > NGK/Denso/Bosch for plugs.
+${brandRule()}
 ${liveOn()?'Use web search to confirm the numbers on retailer and manufacturer sites. ':''}Only include numbers you are confident of; leave out rather than guess.
 Return ONLY JSON:
 {"number":"","brand":"","type":"OEM|aftermarket","part":"what it is","specs":{},"fits":["vehicles it fits"],"crossRefs":[{"brand":"","number":"","kind":"OEM supersession|OEM alternative|aftermarket equivalent","store":"","notes":"","confidence":"high|medium|low"}],"warning":"anything to check, e.g. confirm by VIN","confidence":"high|medium|low"}`;}
@@ -218,11 +224,11 @@ async function xref(num,veh,el){el.innerHTML=skel(`Cross-referencing ${num}…${
   try{const r=await ask(xrefPrompt(num,veh),{json:true,web:liveOn()});el.innerHTML=xrefHTML(r);}catch(e){el.innerHTML=errBox(e);}}
 function kv(o){if(!o||typeof o!=='object')return'';const e=Array.isArray(o)?o.map((v,i)=>[i,v]):Object.entries(o);const c=e.filter(([,v])=>v!=null&&v!=='').map(([k,v])=>`<span class="kv">${typeof k==='number'?'':`<i>${esc(k)}</i> `}${esc(typeof v==='object'?JSON.stringify(v):v)}</span>`).join('');return c?`<div class="kvs">${c}</div>`:'';}
 const conf=c=>c?`<span class="conf c-${esc(c)}">${esc(c)}</span>`:'';
-function xrefHTML(r){const refs=(r.crossRefs||[]).filter(c=>c&&c.number);
+function xrefHTML(r){const refs=(r.crossRefs||[]).filter(c=>c&&c.number).sort((x,y)=>isPref(y.brand)-isPref(x.brand));
   return `<div class="xcard"><div class="pn"><b>${esc(r.part||'Part')}</b>${conf(r.confidence)}</div>
 <div class="small muted">${esc([r.brand,r.type].filter(Boolean).join(' · '))} · <code>${esc(r.number||'')}</code></div>${kv(r.specs)}
 ${(r.fits||[]).length?`<p class="small"><span class="muted">Fits:</span> ${esc(r.fits.join('; '))}</p>`:''}
-${refs.length?`<table class="xt"><thead><tr><th>Brand</th><th>Number</th><th>Type</th><th>Find it</th></tr></thead><tbody>${refs.map(c=>`<tr><td>${esc(c.brand)}${c.store?`<div class="small muted">${esc(c.store)}</div>`:''}</td><td><code>${esc(c.number)}</code> ${conf(c.confidence)}${c.notes?`<div class="small muted">${esc(c.notes)}</div>`:''}</td><td class="small">${esc(c.kind||'')}</td><td class="plinks col">${storeLinks(c.number,true)}</td></tr>`).join('')}</tbody></table>`:'<p class="muted small">No confident cross-references found.</p>'}
+${refs.length?`<table class="xt"><thead><tr><th>Brand</th><th>Number</th><th>Type</th><th>Find it</th></tr></thead><tbody>${refs.map(c=>`<tr${isPref(c.brand)?' class="pref"':''}><td>${esc(c.brand)}${isPref(c.brand)?` <span class="instore">${esc(cfg.store||'Repco')}</span>`:''}${c.store?`<div class="small muted">${esc(c.store)}</div>`:''}</td><td><code>${esc(c.number)}</code> ${conf(c.confidence)}${c.notes?`<div class="small muted">${esc(c.notes)}</div>`:''}</td><td class="small">${esc(c.kind||'')}</td><td class="plinks col">${storeLinks(c.number,true)}</td></tr>`).join('')}</tbody></table>`:'<p class="muted small">No confident cross-references found.</p>'}
 ${r.warning?`<p class="warn">⚠ ${esc(r.warning)}</p>`:''}<div class="plinks">Search the original number: ${storeLinks(r.number||'')}${lnk(`https://partsouq.com/en/search/all?q=${qv(r.number||'')}`,'Partsouq')}</div></div>`;}
 
 /* ---------- vehicle search ---------- */
@@ -342,19 +348,19 @@ function numBadge(p,num){const v=vstate(p,num);if(!v)return'';const src=v.source
   if(v.status==='added')return `<span class="vb ok">✓ found online</span>${src}`;
   return `<span class="vb unk" title="No web evidence found">? unverified, may not exist</span>`;}
 function photoQuery(p){const o=(p.oem||[])[0];const c=(p.crossRefs||[]).find(c=>c&&c.number);return o?`${o} ${p.name}`:c?`${c.brand} ${c.number}`:`${vshort()} ${p.name}`;}
-function partHTML(p,i){const oem=(Array.isArray(p.oem)?p.oem:p.oem?[p.oem]:[]).filter(Boolean);p.oem=oem;const refs=(p.crossRefs||[]).filter(c=>c&&c.number);
+function partHTML(p,i){const oem=(Array.isArray(p.oem)?p.oem:p.oem?[p.oem]:[]).filter(Boolean);p.oem=oem;const refs=(p.crossRefs||[]).filter(c=>c&&c.number).sort((x,y)=>isPref(y.brand)-isPref(x.brand));
   const num=n=>{const v=vstate(p,n);return v&&v.status==='corrected'?`<code class="struck">${esc(n)}</code>`:v&&v.status==='unconfirmed'?`<code class="dim">${esc(n)}</code>`:`<code>${esc(n)}</code>`;};
   return `<div class="pcard" data-i="${i}"><div class="ptop"><a class="pthumb" href="https://www.google.com/search?tbm=isch&q=${qv(photoQuery(p))}" target="_blank" rel="noopener" title="See real photos"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconFor(p.name)}</svg><span>Photos ↗</span></a>
 <div class="pmain"><div class="pn"><b>${esc(p.name)}</b>${p.position?`<span class="pos">${esc(p.position)}</span>`:''}${p.qty?`<span class="qty">×${esc(p.qty)}</span>`:''}${conf(p.confidence)}</div>${kv(p.specs)}</div></div>
 <div class="nums"><div class="numrow"><span class="nlab">OEM</span>${oem.length?oem.map(n=>num(n)+numBadge(p,n)).join(' '):'<span class="muted small">not confirmed, check by VIN</span>'}${oem.length?`<span class="plinks">${lnk(`https://partsouq.com/en/search/all?q=${qv(oem[0])}`,'Partsouq')}${lnk(ebay(oem[0]),'eBay')}<button class="linkbtn" data-act="xref" data-n="${esc(oem[0])}" type="button">Cross-ref</button></span>`:''}</div>
-${refs.map(c=>`<div class="numrow"><span class="nlab">${esc(c.brand)}</span>${num(c.number)}${numBadge(p,c.number)}${c.store?`<span class="small muted">${esc(c.store)}</span>`:''}<span class="plinks">${storeLinks(vstate(p,c.number)?.status==='corrected'?vstate(p,c.number).correct:c.number,true)}</span>${c.notes?`<div class="small muted full">${esc(c.notes)}</div>`:''}</div>`).join('')}</div>
+${refs.map(c=>`<div class="numrow${isPref(c.brand)?' pref':''}"><span class="nlab">${esc(c.brand)}${isPref(c.brand)?`<span class="instore">${esc(cfg.store||'Repco')}</span>`:''}</span>${num(c.number)}${numBadge(p,c.number)}${c.store?`<span class="small muted">${esc(c.store)}</span>`:''}<span class="plinks">${storeLinks(vstate(p,c.number)?.status==='corrected'?vstate(p,c.number).correct:c.number,true)}</span>${c.notes?`<div class="small muted full">${esc(c.notes)}</div>`:''}</div>`).join('')}</div>
 ${p.notes?`<div class="pnote">${esc(p.notes)}</div>`:''}
 <div class="plinks">Search stores: ${storeLinks(`${vshort()} ${p.position||''} ${p.name}`.replace(/\s+/g,' '))}</div>
 <div class="pact">${canVerify()&&!p.vdone?`<button class="btn sm" data-act="verify1" type="button">Verify with Google</button>`:''}${liveOn()?`<button class="btn sm" data-act="live" type="button">Find live listings</button>`:''}<button class="btn sm ghost" data-act="copy" type="button">Copy</button></div><div class="pout"></div></div>`;}
 const canVerify=()=>aiMode()==='gemini'||aiMode()==='api';
 function verifyPrompt(list){return `You are checking a car parts list for accuracy using web search.
 ${ctxLine()}
-For each item, search for its part numbers together with this vehicle on manufacturer catalogues and parts sites, e.g. ryco.com.au, wesfil.com.au, sakurafilters, ngk.com.au, narva.com.au, bendix.com.au, dba.com.au, repco.com.au, burson.com.au, supercheapauto.com.au, sparesbox.com.au, partsouq.com, amayama.com, megazip.net, and the car maker's genuine parts sites.
+For each item, search for its part numbers together with this vehicle on manufacturer catalogues and parts sites, e.g. repco.com.au, ryco.com.au, bendix.com.au, protex.com.au, permaseal.com.au, saas.com.au, wesfil.com.au, sakurafilters, ngk.com.au, narva.com.au, bendix.com.au, dba.com.au, repco.com.au, burson.com.au, supercheapauto.com.au, sparesbox.com.au, partsouq.com, amayama.com, megazip.net, and the car maker's genuine parts sites.
 For every number decide:
 - "confirmed": a source shows this number fits this vehicle (and position).
 - "corrected": sources show a different number is right; put it in "correct".
@@ -429,14 +435,14 @@ $('#askf').addEventListener('submit',ev=>{ev.preventDefault();const q=$('#askq')
 $$('#secnav button').forEach(b=>b.onclick=()=>document.getElementById(b.dataset.go)?.scrollIntoView({behavior:'smooth',block:'start'}));
 
 /* ---------- settings panel ---------- */
-function openSettings(){$('#sGem').value=cfg.geminiKey||'';$('#sSpeed').value=cfg.speed||'fast';const pv=cfg.provider||'gemini';$$('input[name=prov]').forEach(r=>r.checked=r.value===pv);provUI();$('#sKey').value=cfg.apiKey||'';$('#sModel').value=cfg.model||'claude-sonnet-5-5';$('#sLive').checked=!!cfg.live;$('#sReg').value=cfg.regcheck||'';$('#sClaude').hidden=!sample;$('#settings').hidden=false;}
+function openSettings(){$('#sStore').value=cfg.store||'Repco';$('#sBrands').value=cfg.brands||DEFAULT_BRANDS;$('#sGem').value=cfg.geminiKey||'';$('#sSpeed').value=cfg.speed||'fast';const pv=cfg.provider||'gemini';$$('input[name=prov]').forEach(r=>r.checked=r.value===pv);provUI();$('#sKey').value=cfg.apiKey||'';$('#sModel').value=cfg.model||'claude-sonnet-5-5';$('#sLive').checked=!!cfg.live;$('#sReg').value=cfg.regcheck||'';$('#sClaude').hidden=!sample;$('#settings').hidden=false;}
 $('#setBtn').onclick=openSettings;$('#aiBadge').onclick=openSettings;
 $('#sClose').onclick=()=>$('#settings').hidden=true;
 $('#settings').addEventListener('click',e=>{if(e.target.id==='settings')$('#settings').hidden=true;});
 function provUI(){const pv=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';$('#pGem').hidden=pv!=='gemini';$('#pAnt').hidden=pv!=='anthropic';}
 $$('input[name=prov]').forEach(r=>r.onchange=provUI);
 $('#sTest').onclick=geminiDiag;
-$('#sSave').onclick=()=>{cfg.provider=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';cfg.geminiKey=$('#sGem').value.trim();cfg.speed=$('#sSpeed').value;gList=null;cfg.apiKey=$('#sKey').value.trim();cfg.model=$('#sModel').value;cfg.live=$('#sLive').checked;cfg.regcheck=$('#sReg').value.trim();saveCfg();$('#settings').hidden=true;};
+$('#sSave').onclick=()=>{cfg.provider=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';cfg.geminiKey=$('#sGem').value.trim();cfg.store=$('#sStore').value.trim()||'Repco';cfg.brands=$('#sBrands').value.trim()||DEFAULT_BRANDS;st.pcache={};cfg.speed=$('#sSpeed').value;gList=null;cfg.apiKey=$('#sKey').value.trim();cfg.model=$('#sModel').value;cfg.live=$('#sLive').checked;cfg.regcheck=$('#sReg').value.trim();saveCfg();$('#settings').hidden=true;};
 $('#sClear').onclick=()=>{cfg={};saveCfg();openSettings();};
 
 /* ---------- manual sketch + recent ---------- */

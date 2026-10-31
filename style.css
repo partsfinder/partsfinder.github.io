@@ -237,3 +237,8 @@ code.struck{text-decoration:line-through;opacity:.55}
 .vbar .skel{padding:0}
 .srcs{font-size:13px;padding-left:18px;margin:6px 0}
 code.dim{opacity:.5;border-style:dashed}
+
+.instore{display:inline-block;margin-left:5px;font:700 9px 'IBM Plex Mono';color:#1a1205;background:var(--accent);border-radius:4px;padding:1px 4px;vertical-align:1px;letter-spacing:.04em;text-transform:uppercase}
+.numrow.pref{background:rgba(245,165,36,.06);border-radius:8px;padding:4px 6px;margin:2px -6px}
+.nlab{text-transform:none}
+textarea{background:#0b1017;border:1px solid #2b3542;color:var(--text);border-radius:10px;padding:10px 12px;font:inherit;outline:none;resize:vertical}

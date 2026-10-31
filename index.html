@@ -7,7 +7,7 @@
 <meta name="description" content="Find every part on your car by rego, VIN or model: OEM numbers, sizes, cross-references to Australian brands, and interactive engine diagrams.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=1793425869">
+<link rel="stylesheet" href="style.css?v=1793426030">
 </head>
 <body>
 <header class="top">
@@ -160,6 +160,11 @@
       <label class="lab" for="sModel">Model</label>
       <select id="sModel" style="width:100%"><option value="claude-sonnet-5-5">Claude Sonnet 5.5 (recommended)</option><option value="claude-opus-5-5">Claude Opus 5.5 (most thorough, slower)</option><option value="claude-haiku-5-5">Claude Haiku 5.5 (fastest, cheapest)</option></select>
     </div>
+    <label class="lab" for="sStore" style="margin-top:12px">My parts store</label>
+    <select id="sStore" style="width:100%"><option>Repco</option><option>Supercheap</option><option>Autobarn</option><option>Burson</option><option>Sparesbox</option><option>Autopro</option></select>
+    <label class="lab" for="sBrands" style="margin-top:12px">Preferred brands (listed first)</label>
+    <textarea id="sBrands" rows="2" style="width:100%"></textarea>
+    <p class="small muted">Cross-references try these brands first and tag them as stocked by your store.</p>
     <label class="check"><input id="sLive" type="checkbox"> Live retailer search: checks real Repco, Supercheap, Burson and other listings on the web and verifies cross-references (slower; free on Gemini up to 5,000 searches a month)</label>
     <details class="more"><summary>Advanced: automatic rego lookup (paid service, optional)</summary>
       <input id="sReg" type="text" placeholder="RegCheck username" style="width:100%;margin-top:8px">
@@ -169,7 +174,7 @@
   </div>
 </div>
 
-<script src="diagram.js?v=1793425869"></script>
-<script src="app.js?v=1793425869"></script>
+<script src="diagram.js?v=1793426030"></script>
+<script src="app.js?v=1793426030"></script>
 </body>
 </html>
