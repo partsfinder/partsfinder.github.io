@@ -252,3 +252,4 @@ textarea{background:#0b1017;border:1px solid #2b3542;color:var(--text);border-ra
 .ritem{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:4px 0;border-bottom:1px dashed #2b2a22;font-size:14px}
 .rimport{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
 .rimport label.btn{cursor:pointer}
+.kvlab{font:600 10px 'IBM Plex Mono';color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:6px}.kvlab+.kvs{margin-top:3px;opacity:.85}
