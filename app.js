@@ -39,15 +39,16 @@ async function geminiModels(){if(gList)return gList;let found=[];
       .filter(n=>/flash/.test(n)&&!/image|tts|audio|live|embed|thinking-exp|exp-/.test(n))
       .sort((a,b)=>(/lite/.test(a)-/lite/.test(b))||(/preview/.test(a)-/preview/.test(b))||ver(b)-ver(a));}
   catch(e){if(e.code==='bad_key')throw e;}
-  gList=[...new Set([cfg.gModel,...found.slice(0,4),...GEM_MODELS].filter(Boolean))];return gList;}
-async function geminiCall(prompt,{web=false,maxTokens=16000}={}){const list=await geminiModels();let last;
+  const lites=found.filter(n=>/lite/.test(n)&&!/preview/.test(n)).slice(0,2);gList=[...new Set([cfg.gModel,...found.filter(n=>!/lite/.test(n)).slice(0,4),...GEM_MODELS,...lites].filter(Boolean))];return gList;}
+async function geminiCall(prompt,{web=false,maxTokens=16000,tier='default'}={}){const all=await geminiModels();const fast=tier==='quick'||(tier==='parts'&&(cfg.speed||'fast')==='fast');
+  const list=fast?[...all.filter(m=>/lite/.test(m)),...all.filter(m=>!/lite/.test(m))]:all;let last;
   for(const m of list){let think=!cfg.gNoThink;
     for(let attempt=0;attempt<2;attempt++){
       const gc={maxOutputTokens:maxTokens};if(think)gc.thinkingConfig=/gemini-2\./.test(m)?{thinkingBudget:1024}:{thinkingLevel:'low'};
       const body={contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:gc};if(web)body.tools=[{google_search:{}}];
       const r=await gfetch(`${GBASE}/models/${m}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':cfg.geminiKey},body:JSON.stringify(body)},web?120000:90000);
       const j=await r.json().catch(()=>({}));
-      if(r.ok){if(cfg.gModel!==m){cfg.gModel=m;saveCfg();}const c=j.candidates?.[0];const t=(c?.content?.parts||[]).filter(p=>p.text&&!p.thought).map(p=>p.text).join('');
+      if(r.ok){if(!/lite/.test(m)&&cfg.gModel!==m){cfg.gModel=m;saveCfg();}const c=j.candidates?.[0];const t=(c?.content?.parts||[]).filter(p=>p.text&&!p.thought).map(p=>p.text).join('');
         if(!t)throw new Error(c?.finishReason?`No answer (${c.finishReason}). Try again or reword it.`:(j.promptFeedback?.blockReason?`Blocked (${j.promptFeedback.blockReason}).`:'Empty answer, try again.'));return t;}
       const msg=j?.error?.message||('HTTP '+r.status);
       if(r.status===400&&think&&/think/i.test(msg)){think=false;cfg.gNoThink=true;saveCfg();continue;}
@@ -61,8 +62,8 @@ async function geminiCall(prompt,{web=false,maxTokens=16000}={}){const list=awai
 async function ask(prompt,o={}){await samplePromise;const m=aiMode();if(m==='none')throw{code:'nokey'};let text;
   if(m==='gemini'){try{text=await geminiCall(prompt,o);}catch(e){if(o.web&&e.code==='api'){text=await geminiCall(prompt,{...o,web:false});}else throw e;}}
   else if(m==='api'){try{text=await apiCall(prompt,o);}catch(e){if(o.web&&e.code==='api'){text=await apiCall(prompt,{...o,web:false});}else throw e;}}
-  else{if(o.json&&typeof sample.json==='function'){try{return parseLoose(await sample.json(prompt,{modelTier:o.tier||'default'}));}catch(e){if(e&&e.code)throw e;}}
-    const r=await sample(prompt,{modelTier:o.tier||'default',cache:o.cache});text=r.text;}
+  else{if(o.json&&typeof sample.json==='function'){try{return parseLoose(await sample.json(prompt,{modelTier:o.tier==='quick'?'quick':'default'}));}catch(e){if(e&&e.code)throw e;}}
+    const r=await sample(prompt,{modelTier:o.tier==='quick'?'quick':'default',cache:o.cache});text=r.text;}
   return o.json?parseLoose(text):text;}
 function errMsg(e){if(!e)return'Something went wrong.';
   if(e.code==='nokey')return'No AI key set up yet. Open Settings and paste your free Gemini key.';
@@ -72,7 +73,8 @@ function errMsg(e){if(!e)return'Something went wrong.';
   if(e.code==='rate_limited')return'Hit the speed limit for your key. Wait a minute and try again.';
   return'Lookup failed: '+(e.message||String(e));}
 const errBox=e=>`<div class="errbox">${esc(errMsg(e))}${e&&(e.code==='nokey'||e.code==='bad_key')?' <button class="linkbtn" data-open-settings type="button">Open settings</button>':''}</div>`;
-const skel=t=>`<div class="skel"><span class="spin"></span>${esc(t)}</div>`;
+const skel=t=>`<div class="skel"><span class="spin"></span>${esc(t)}<span class="mono muted tick" data-t0="${Date.now()}"></span></div>`;
+setInterval(()=>$$('.tick').forEach(e=>{e.textContent=' '+Math.round((Date.now()-+e.dataset.t0)/1000)+'s';}),1000);
 let stTimer=null;function status(html,loading,err){clearInterval(stTimer);const el=$('#status');if(!html){el.innerHTML='';return;}el.innerHTML=`<div class="card st ${err?'err':''}">${loading?'<span class="spin"></span>':''}<span>${html}</span>${loading?'<span class="mono muted" id="stSecs" style="margin-left:auto"></span>':''}</div>`;
   if(loading){const t0=Date.now();stTimer=setInterval(()=>{const e=$('#stSecs');if(!e){clearInterval(stTimer);return;}const s=Math.round((Date.now()-t0)/1000);e.textContent=s+'s';},1000);}}
 document.addEventListener('click',e=>{if(e.target.closest('[data-open-settings]'))openSettings();});
@@ -131,7 +133,7 @@ function partsPrompt(query,cat){return `You are an experienced parts interpreter
 ${ctxLine()}
 ${cat?`Category requested: ${cat}`:`Customer's search: "${query}"`}
 Read abbreviations and trade slang the way a parts interpreter would (e.g. LCA = lower control arm, W/B = wiper blade, H7 = headlight globe type, "15A" = fuse rating). This covers the WHOLE vehicle, not just the engine.
-List every matching part fitted to this vehicle (up to 30). List positions separately (front/rear, LH/RH; in Australia RH is the driver side) when part numbers or sizes differ.
+List the matching parts fitted to this vehicle (up to 20, most commonly needed first). List positions separately (front/rear, LH/RH; in Australia RH is the driver side) when part numbers or sizes differ.
 For every part give:
 - "oem": genuine part number(s) as an array. Include a number ONLY if you are confident it is right for this vehicle; otherwise an empty array.
 - "specs": the details a counter person checks, as key-value pairs. E.g. thread size and pitch, length, diameter, hole size, globe type/base/wattage/voltage, fuse rating/type/position, wiper length in mm and inches plus connector, capacity, CCA, viscosity, dimensions.
@@ -203,7 +205,7 @@ ${r.warning?`<p class="warn">⚠ ${esc(r.warning)}</p>`:''}<div class="plinks">S
 
 /* ---------- vehicle search ---------- */
 async function runSearch(q,hint,extra={}){const my=++st.ver;saveRecent(q,hint);$('#choose').hidden=true;$('#result').hidden=true;status('Identifying vehicle…',true);
-  try{const r=await ask(idPrompt(q,hint),{json:true});if(my!==st.ver)return;
+  try{const r=await ask(idPrompt(q,hint),{json:true,tier:'quick',maxTokens:4000});if(my!==st.ver)return;
     if(!r.found||!Array.isArray(r.engines)||!r.engines.length){status(esc(r.message||'Couldn’t identify that vehicle. Try adding the year, model or engine.'),false,true);return;}
     const vinM=(q.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)||[])[0];r.vinStr=(extra.vin||vinM||'').toUpperCase()||null;r.rego=extra.rego||null;
     st.vehicle=r;status('');renderChoices(r);if(r.engines.length===1)chooseEngine(r.engines[0]);}
@@ -223,7 +225,7 @@ function chooseEngine(e){const my=++st.ver;st.engine=e;st.spec=null;st.sel=null;
   st.s=normSpec(guessFromLabel(e));renderDiagram();renderDetail();renderLinks();
   $('#result').scrollIntoView({behavior:'smooth',block:'start'});
   partSearch(null,CATS[0]);
-  ask(specPrompt(),{json:true}).then(r=>{if(my!==st.ver)return;st.spec=r;st.s=normSpec(Object.assign(guessFromLabel(e),r.engine||{}));renderSpec();renderDiagram();renderDetail();renderLinks();})
+  ask(specPrompt(),{json:true,tier:'parts'}).then(r=>{if(my!==st.ver)return;st.spec=r;st.s=normSpec(Object.assign(guessFromLabel(e),r.engine||{}));renderSpec();renderDiagram();renderDetail();renderLinks();})
     .catch(err=>{if(my!==st.ver)return;$('#rOverview').innerHTML='';$('#specs').innerHTML=errBox(err);$('#fluids').innerHTML='';$('#issues').innerHTML='';});}
 
 /* ---------- whole-car parts search ---------- */
@@ -234,8 +236,8 @@ $('#psf').addEventListener('submit',ev=>{ev.preventDefault();const q=$('#psq').v
 async function partSearch(query,cat){if(!st.vehicle||st.vehicle.manual)return;const my=st.ver;const key=cat?'c:'+cat[0]:'q:'+query.toLowerCase();renderCats(cat?cat[0]:null);
   const el=$('#presults');const label=cat?cat[0]:`“${query}”`;
   if(st.pcache[key]){renderParts(st.pcache[key],label);return;}
-  el.innerHTML=skel(`Finding ${label} for ${vshort()}… this can take 20–40 seconds`);
-  try{const hints=query?expandAbbr(query):[];const r=await ask(partsPrompt(query?(query+(hints.length?` (${hints.join('; ')})`:'')):null,cat?`${cat[0]}: ${cat[1]}`:null),{json:true});
+  el.innerHTML=skel(`Finding ${label} for ${vshort()}…`);
+  try{const hints=query?expandAbbr(query):[];const r=await ask(partsPrompt(query?(query+(hints.length?` (${hints.join('; ')})`:'')):null,cat?`${cat[0]}: ${cat[1]}`:null),{json:true,tier:'parts'});
     if(my!==st.ver)return;st.pcache[key]=r;renderParts(r,label);}
   catch(e){if(my!==st.ver)return;el.innerHTML=errBox(e);}}
 function renderParts(r,label){const items=(r.items||[]).filter(Boolean);st.pitems=items;const el=$('#presults');
@@ -304,13 +306,13 @@ $('#askf').addEventListener('submit',ev=>{ev.preventDefault();const q=$('#askq')
 $$('#secnav button').forEach(b=>b.onclick=()=>document.getElementById(b.dataset.go)?.scrollIntoView({behavior:'smooth',block:'start'}));
 
 /* ---------- settings panel ---------- */
-function openSettings(){$('#sGem').value=cfg.geminiKey||'';const pv=cfg.provider||'gemini';$$('input[name=prov]').forEach(r=>r.checked=r.value===pv);provUI();$('#sKey').value=cfg.apiKey||'';$('#sModel').value=cfg.model||'claude-sonnet-5-5';$('#sLive').checked=!!cfg.live;$('#sReg').value=cfg.regcheck||'';$('#sClaude').hidden=!sample;$('#settings').hidden=false;}
+function openSettings(){$('#sGem').value=cfg.geminiKey||'';$('#sSpeed').value=cfg.speed||'fast';const pv=cfg.provider||'gemini';$$('input[name=prov]').forEach(r=>r.checked=r.value===pv);provUI();$('#sKey').value=cfg.apiKey||'';$('#sModel').value=cfg.model||'claude-sonnet-5-5';$('#sLive').checked=!!cfg.live;$('#sReg').value=cfg.regcheck||'';$('#sClaude').hidden=!sample;$('#settings').hidden=false;}
 $('#setBtn').onclick=openSettings;$('#aiBadge').onclick=openSettings;
 $('#sClose').onclick=()=>$('#settings').hidden=true;
 $('#settings').addEventListener('click',e=>{if(e.target.id==='settings')$('#settings').hidden=true;});
 function provUI(){const pv=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';$('#pGem').hidden=pv!=='gemini';$('#pAnt').hidden=pv!=='anthropic';}
 $$('input[name=prov]').forEach(r=>r.onchange=provUI);
-$('#sSave').onclick=()=>{cfg.provider=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';cfg.geminiKey=$('#sGem').value.trim();cfg.apiKey=$('#sKey').value.trim();cfg.model=$('#sModel').value;cfg.live=$('#sLive').checked;cfg.regcheck=$('#sReg').value.trim();saveCfg();$('#settings').hidden=true;};
+$('#sSave').onclick=()=>{cfg.provider=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';cfg.geminiKey=$('#sGem').value.trim();cfg.speed=$('#sSpeed').value;gList=null;cfg.apiKey=$('#sKey').value.trim();cfg.model=$('#sModel').value;cfg.live=$('#sLive').checked;cfg.regcheck=$('#sReg').value.trim();saveCfg();$('#settings').hidden=true;};
 $('#sClear').onclick=()=>{cfg={};saveCfg();openSettings();};
 
 /* ---------- manual sketch + recent ---------- */
