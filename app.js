@@ -161,6 +161,23 @@ const DEFAULT_BRANDS='Ryco, Repco, ProSelect, Protex, Bendix, SAAS, Permaseal';
 const prefBrands=()=>(cfg.brands||DEFAULT_BRANDS).split(/[,\n]/).map(x=>x.trim()).filter(Boolean);
 const isPref=b=>{const n=normN(b);return!!n&&prefBrands().some(x=>{const y=normN(x);return n===y||n.startsWith(y);});};
 function brandRule(){const b=prefBrands();return b.length?`PRIORITY BRANDS: the customer shops at ${cfg.store||'Repco'}, which stocks ${b.join(', ')}. When one of these brands genuinely makes this exact part AND you have a real number for it, list it first with "store":"${cfg.store||'Repco'}". Never list a priority brand just to fill the slot, and never for a product type it doesn't make.`:'';}
+/* ---------- number-format rules: things AI can't fake ---------- */
+const DEFAULT_RULES='Repco, Permaseal: rocker cover gasket|valve cover gasket|cam cover gasket = RC';
+function parseRules(){return(cfg.rules??DEFAULT_RULES).split('\n').map(l=>l.trim()).filter(l=>l&&l.includes('=')).map(l=>{const[lhs,rhs]=l.split('=');const[br,kw]=lhs.split(':');
+  return{brands:(br||'').split(',').map(x=>normN(x)).filter(Boolean),kw:(kw||'').split('|').map(x=>x.trim().toLowerCase()).filter(Boolean),pre:(rhs||'').split(',').map(x=>normN(x)).filter(Boolean)};}).filter(r=>r.brands.length&&r.pre.length);}
+const OEM_FAMILY={nissan:[[/rocker|valve cover|cam cover/i,/gasket/i,['13270']],[/oil filter/i,null,['15208']],[/air filter|air cleaner/i,null,['16546']],[/spark plug/i,null,['22401']],[/fuel filter/i,null,['16400','16403','16901']]],
+toyota:[[/valve cover|rocker|cam cover|head cover/i,/gasket/i,['11213']],[/oil filter/i,null,['90915','04152']],[/air filter|air cleaner/i,null,['17801']],[/spark plug/i,null,['90919','90080']],[/cabin|pollen|a\/c filter/i,null,['87139','88568','88880']]],
+lexus:'toyota',infiniti:'nissan'};
+function makeKey(){const m=(st.vehicle?.make||st.vehicle?.vehicle||'').toLowerCase();for(const k of Object.keys(OEM_FAMILY))if(m.includes(k))return typeof OEM_FAMILY[k]==='string'?OEM_FAMILY[k]:k;return null;}
+function oemOK(p,num){const k=makeKey();if(!k)return true;const n=normN(num);
+  if(!/^\d{5}[A-Z0-9]{5}$/.test(n))return false;
+  for(const[re,re2,fams]of OEM_FAMILY[k]){if(re.test(p.name||'')&&(!re2||re2.test(p.name||'')))return fams.some(f=>n.startsWith(f));}
+  return true;}
+const looksFake=num=>{const n=normN(num);return n.length<4||/(000|001)$/.test(n)&&!/^\d{5}[A-Z0-9]{5}$/.test(n)||/(XXX|ABC|123456|EXAMPLE|SAMPLE)/.test(n);};
+function ruleOK(p,brand,num){const b=normN(brand),n=normN(num),name=(p.name||'').toLowerCase();
+  for(const r of parseRules()){if(r.brands.some(x=>b===x||b.startsWith(x))&&(!r.kw.length||r.kw.some(k=>name.includes(k))))return r.pre.some(x=>n.startsWith(x));}
+  return true;}
+function ruleText(){const rs=(cfg.rules??DEFAULT_RULES).split('\n').filter(l=>l.includes('='));return rs.length?`NUMBER FORMAT RULES (numbers that break these are rejected): ${rs.join('; ')}.`:'';}
 /* ---------- prompts ---------- */
 function ctxLine(){const v=st.vehicle,e=st.engine;return `Vehicle: ${v.vehicle}${v.market?` (${v.market} market)`:''}${v.vinStr?`. VIN: ${v.vinStr}`:''}${v.rego?`. Rego: ${v.rego}`:''}. Engine: ${e?.label||'unknown'}${e?.code?` [${e.code}]`:''}.`;}
 function ctx(){return ctxLine()+` Known engine data: ${JSON.stringify(st.spec?.engine||{})}`;}
@@ -192,8 +209,10 @@ ${cat?'List the matching parts fitted to this vehicle (up to 15, most commonly n
 ${grounded?`USE GOOGLE SEARCH FIRST. Search for this part for this exact vehicle/engine on catalogue and retailer sites (repco.com.au, ryco.com.au, permaseal, bendix.com.au, protex, ngk.com.au, narva.com.au, burson.com.au, sparesbox.com.au, partsouq.com, amayama.com, megazip.net, the maker's genuine parts sites, forums for the engine code). ONLY output part numbers that you actually saw in search results for this vehicle or engine, and give the URL where you saw each one in "source". If you found no number, leave it out. A number without a source will be hidden from the customer.`:'Include a number ONLY if you have actually seen it listed for this vehicle; never guess or construct numbers. An empty list is better than a wrong number.'}
 For every part give:
 - "oem": genuine part numbers as an array of {"number":"","source":"URL or null"}.
-- "specs": the details a counter person checks, as key-value pairs. E.g. thread size and pitch, length, diameter, hole size, globe type/base/wattage/voltage, fuse rating/type/position, wiper length in mm and inches plus connector, capacity, CCA, viscosity, material, dimensions.
+- "specs": the details a counter person checks, as key-value pairs, ONLY values you saw in a source or that are standard for this exact part (never estimate dimensions or bolt counts). E.g. thread size and pitch, length, diameter, hole size, globe type/base/wattage/voltage, fuse rating/type/position, wiper length in mm and inches plus connector, capacity, CCA, viscosity, material, dimensions.
 - "crossRefs": aftermarket equivalents sold in Australia, as {"brand","number","store":"e.g. Repco / Burson / Supercheap","source":"URL or null","notes"}.
+${ruleText()}
+Genuine numbers follow the maker's real format (e.g. Nissan and Toyota use 5 digits + 5 characters, and each part type has its own family, like Nissan rocker cover gaskets 13270-xxxxx). Never write placeholder-looking numbers such as 100-001 or ABC-001.
 BRAND RULES: only list a brand for products that brand actually makes. Ryco and Wesfil = filters only. Permaseal and Felpro = gaskets and seals. Bendix, Protex, DBA and RDA = brakes. NGK and Denso = spark plugs, glow plugs, ignition and oxygen sensors. Narva, Projecta, Philips and Osram = globes, fuses and electrical. Gates and Dayco = belts, hoses, tensioners. If no listed brand makes this part, give whichever real brand does, or none.
 ${brandRule()}
 Return ONLY JSON:
@@ -334,12 +353,17 @@ async function partSearch(query,cat){if(!st.vehicle||st.vehicle.manual)return;co
   try{const hints=query?expandAbbr(query):[];const grounded=canVerify();const meta={};const r=normalizeItems(await ask(partsPrompt(query?(query+(hints.length?` (${hints.join('; ')})`:'')):null,cat?`${cat[0]}: ${cat[1]}`:null,grounded),{json:true,tier:grounded?'default':'parts',web:grounded,meta,maxTokens:12000}),grounded,meta);r.sources=meta.sources||[];r.grounded=grounded;
     if(my!==st.ver)return;st.pcache[key]=r;r.label=label;renderParts(r,label,key);}
   catch(e){if(my!==st.ver)return;el.innerHTML=errBox(e);}}
-const BRAND_SCOPE={ryco:/filter/i,wesfil:/filter/i,sakura:/filter/i,permaseal:/gasket|seal|o.?ring/i,felpro:/gasket|seal|o.?ring/i,bendix:/brake|pad|shoe|rotor|disc|drum|caliper|fluid/i,protex:/brake|pad|shoe|rotor|disc|drum|caliper|cylinder|hose/i,dba:/brake|rotor|disc|pad/i,rda:/brake|rotor|disc|drum|pad/i,ngk:/spark|glow|plug|ignition|lead|coil|oxygen|o2|lambda|sensor/i,narva:/globe|bulb|lamp|light|fuse|relay|switch|horn|wir|led|beacon|flasher/i,projecta:/globe|bulb|lamp|light|fuse|relay|switch|horn|wir|led|batter|charger|jump/i,gates:/belt|hose|tensioner|idler|pulley|water pump|timing/i,dayco:/belt|hose|tensioner|idler|pulley|water pump|timing/i};
-function scopeOK(brand,p){const k=normN(brand).toLowerCase();const re=BRAND_SCOPE[k];if(!re)return true;return re.test(`${p.name} ${p.notes||''} ${JSON.stringify(p.specs||{})}`);}
+const BRAND_SCOPE={ryco:/filter/i,wesfil:/filter/i,sakura:/filter/i,permaseal:/gasket|seal|o.?ring/i,felpro:/gasket|seal|o.?ring/i,bendix:/brake|pad|shoe|rotor|disc|drum|caliper|fluid/i,protex:/brake|pad|shoe|rotor|disc|drum|caliper|cylinder|hose/i,dba:/brake|rotor|disc|pad/i,rda:/brake|rotor|disc|drum|pad/i,ngk:/spark|glow|plug|ignition|lead|coil|oxygen|o2|lambda|sensor/i,narva:/\b(globes?|bulbs?|lamps?|lights?|fuses?|relays?|switch(es)?|horns?|wiring|led|beacons?|flashers?)\b/i,projecta:/\b(globes?|bulbs?|lamps?|lights?|fuses?|relays?|switch(es)?|horns?|wiring|led|batter(y|ies)|chargers?|jump)\b/i,gates:/belt|hose|tensioner|idler|pulley|water pump|timing/i,dayco:/belt|hose|tensioner|idler|pulley|water pump|timing/i};
+function scopeOK(brand,p){const k=normN(brand).toLowerCase();const re=BRAND_SCOPE[k];if(!re)return true;return re.test(p.name||'');}
 function normalizeItems(r,grounded,meta){const sup=normN(meta&&meta.supported||'');const hasSup=!!sup;(r.items||[]).forEach(p=>{if(!p)return;p.v=p.v||{};
   const oem=(Array.isArray(p.oem)?p.oem:p.oem?[p.oem]:[]).map(o=>typeof o==='string'?{number:o,source:null}:o).filter(o=>o&&o.number);
-  p.oem=oem.map(o=>o.number);
-  p.crossRefs=(p.crossRefs||[]).filter(c=>c&&c.number&&scopeOK(c.brand,p));
+  p.rejected=[];
+  oem.forEach(o=>{if(!oemOK(p,o.number)||looksFake(o.number))p.rejected.push({brand:'OEM',number:o.number,why:looksFake(o.number)?'looks like a placeholder':'not a valid genuine number for this part'});});
+  const okOem=oem.filter(o=>oemOK(p,o.number)&&!looksFake(o.number));p.oem=okOem.map(o=>o.number);
+  p.crossRefs=(p.crossRefs||[]).filter(c=>{if(!c||!c.number)return false;if(!scopeOK(c.brand,p)){p.rejected.push({brand:c.brand,number:c.number,why:`${c.brand} doesn't make this part`});return false;}
+    if(!ruleOK(p,c.brand,c.number)){p.rejected.push({brand:c.brand,number:c.number,why:'breaks your number rule'});return false;}
+    if(looksFake(c.number)){p.rejected.push({brand:c.brand,number:c.number,why:'looks like a placeholder'});return false;}return true;});
+  oem.splice(0,oem.length,...okOem);
   const judge=(num,src)=>{const n=normN(num);const url=/^https?:/.test(src||'');if(hasSup&&n.length>=4&&sup.includes(n))return'confirmed';return url?'claimed':'unconfirmed';};
   if(grounded){oem.forEach(o=>{p.v[normN(o.number)]={status:judge(o.number,o.source),source:o.source};});
     p.crossRefs.forEach(c=>{p.v[normN(c.number)]={status:judge(c.number,c.source),source:c.source};});
@@ -397,11 +421,11 @@ function numBadge(p,num){const v=vstate(p,num);if(!v)return'';const src=v.source
   return `<span class="vb unk" title="No web evidence found">? unverified, may not exist</span>`;}
 function photoQuery(p){const o=(p.oem||[])[0];const c=(p.crossRefs||[]).find(c=>c&&c.number);return o?`${o} ${p.name}`:c?`${c.brand} ${c.number}`:`${vshort()} ${p.name}`;}
 const CATALOGS=[[/filter/i,[['Ryco filter finder','https://www.ryco.com.au/'],['Wesfil','https://www.wesfil.com.au/']]],
-[/globe|bulb|lamp|light|fuse|relay|led|hid|drl/i,[['Narva vehicle lookup','https://www.narva.com.au/']]],
-[/spark|glow|plug|ignition|coil|oxygen|o2|lambda/i,[['NGK part finder','https://ngk.com.au/']]],
-[/brake|pad|shoe|rotor|disc|drum|caliper/i,[['Bendix pad finder','https://www.bendix.com.au/'],['Protex','https://www.protex.com.au/']]],
-[/batter/i,[['Century battery finder','https://www.centurybatteries.com.au/']]],
-[/wiper|blade|refill/i,[['Bosch wiper finder','https://www.bosch.com.au/']]]];
+[/\b(globes?|bulbs?|lamps?|lights?|fuses?|relays?|led|hid|drl)\b/i,[['Narva vehicle lookup','https://www.narva.com.au/']]],
+[/\b(spark|glow|ignition|coils?|oxygen|o2|lambda)\b/i,[['NGK part finder','https://ngk.com.au/']]],
+[/\b(brakes?|pads?|shoes?|rotors?|discs?|drums?|calipers?)\b/i,[['Bendix pad finder','https://www.bendix.com.au/'],['Protex','https://www.protex.com.au/']]],
+[/\bbatter(y|ies)\b/i,[['Century battery finder','https://www.centurybatteries.com.au/']]],
+[/\b(wipers?|wiper blades?|refills?)\b/i,[['Bosch wiper finder','https://www.bosch.com.au/']]]];
 function catalogLinks(p){const t=`${p.name} ${JSON.stringify(p.specs||{})}`;const out=[];CATALOGS.forEach(([re,ls])=>{if(re.test(t))ls.forEach(l=>out.push(l));});
   out.push(['Repco (enter your rego)','https://www.repco.com.au/']);
   const v=st.vehicle?.vinStr;out.push([v?'Genuine catalogue (your VIN)':'Genuine catalogue (Partsouq)',v?`https://partsouq.com/en/search/all?q=${v}`:'https://partsouq.com/']);
@@ -413,6 +437,7 @@ function partHTML(p,i){const oem=(Array.isArray(p.oem)?p.oem:p.oem?[p.oem]:[]).f
 <div class="pmain"><div class="pn"><b>${esc(p.name)}</b>${p.position?`<span class="pos">${esc(p.position)}</span>`:''}${p.qty?`<span class="qty">×${esc(p.qty)}</span>`:''}${conf(p.confidence)}</div>${kv(p.specs)}</div></div>
 <div class="nums"><div class="numrow"><span class="nlab">OEM</span>${oem.filter(n=>!hidden(p,n)).length?oem.filter(n=>!hidden(p,n)).map(n=>num(n)+numBadge(p,n)).join(' '):'<span class="muted small">no verified genuine number found, check by VIN</span>'}${oem.filter(n=>!hidden(p,n)).length?`<span class="plinks">${lnk(`https://partsouq.com/en/search/all?q=${qv(oem.filter(n=>!hidden(p,n))[0])}`,'Partsouq')}${lnk(ebay(oem[0]),'eBay')}<button class="linkbtn" data-act="xref" data-n="${esc(oem[0])}" type="button">Cross-ref</button></span>`:''}</div>
 ${refs.filter(c=>!hidden(p,c.number)).map(c=>`<div class="numrow${isPref(c.brand)?' pref':''}"><span class="nlab">${esc(c.brand)}${isPref(c.brand)?`<span class="instore">${esc(cfg.store||'Repco')}</span>`:''}</span>${num(c.number)}${numBadge(p,c.number)}${c.store?`<span class="small muted">${esc(c.store)}</span>`:''}<span class="plinks">${storeLinks(vstate(p,c.number)?.status==='corrected'?vstate(p,c.number).correct:c.number,true)}</span>${c.notes?`<div class="small muted full">${esc(c.notes)}</div>`:''}</div>`).join('')}</div>
+${(p.rejected||[]).length?`<details class="more"><summary>${p.rejected.length} number${p.rejected.length>1?'s':''} rejected by format checks</summary><ul class="srcs">${p.rejected.map(x=>`<li><code>${esc(x.number)}</code> ${esc(x.brand)}: ${esc(x.why)}</li>`).join('')}</ul></details>`:''}
 ${p.notes?`<div class="pnote">${esc(p.notes)}</div>`:''}
 ${catalogLinks(p)}<div class="plinks">Search stores: ${storeLinks(`${vshort()} ${p.position||''} ${p.name}`.replace(/\s+/g,' '))}</div>
 <div class="pact">${canVerify()&&!p.vdone?`<button class="btn sm" data-act="verify1" type="button">Verify with Google</button>`:''}${liveOn()?`<button class="btn sm" data-act="live" type="button">Find live listings</button>`:''}<button class="btn sm ghost" data-act="copy" type="button">Copy</button></div><div class="pout"></div></div>`;}
@@ -495,14 +520,14 @@ $('#askf').addEventListener('submit',ev=>{ev.preventDefault();const q=$('#askq')
 $$('#secnav button').forEach(b=>b.onclick=()=>document.getElementById(b.dataset.go)?.scrollIntoView({behavior:'smooth',block:'start'}));
 
 /* ---------- settings panel ---------- */
-function openSettings(){$('#sGroq').value=cfg.groqKey||'';$('#sStore').value=cfg.store||'Repco';$('#sBrands').value=cfg.brands||DEFAULT_BRANDS;$('#sGem').value=cfg.geminiKey||'';$('#sSpeed').value=cfg.speed||'fast';const pv=cfg.provider||'gemini';$$('input[name=prov]').forEach(r=>r.checked=r.value===pv);provUI();$('#sKey').value=cfg.apiKey||'';$('#sModel').value=cfg.model||'claude-sonnet-5-5';$('#sLive').checked=!!cfg.live;$('#sReg').value=cfg.regcheck||'';$('#sClaude').hidden=!sample;$('#settings').hidden=false;}
+function openSettings(){$('#sRules').value=cfg.rules??DEFAULT_RULES;$('#sGroq').value=cfg.groqKey||'';$('#sStore').value=cfg.store||'Repco';$('#sBrands').value=cfg.brands||DEFAULT_BRANDS;$('#sGem').value=cfg.geminiKey||'';$('#sSpeed').value=cfg.speed||'fast';const pv=cfg.provider||'gemini';$$('input[name=prov]').forEach(r=>r.checked=r.value===pv);provUI();$('#sKey').value=cfg.apiKey||'';$('#sModel').value=cfg.model||'claude-sonnet-5-5';$('#sLive').checked=!!cfg.live;$('#sReg').value=cfg.regcheck||'';$('#sClaude').hidden=!sample;$('#settings').hidden=false;}
 $('#setBtn').onclick=openSettings;$('#aiBadge').onclick=openSettings;
 $('#sClose').onclick=()=>$('#settings').hidden=true;
 $('#settings').addEventListener('click',e=>{if(e.target.id==='settings')$('#settings').hidden=true;});
 function provUI(){const pv=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';$('#pGem').hidden=pv==='anthropic';$('#pAnt').hidden=pv!=='anthropic';}
 $$('input[name=prov]').forEach(r=>r.onchange=provUI);
 $('#sTest').onclick=geminiDiag;
-$('#sSave').onclick=()=>{cfg.provider=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';cfg.geminiKey=$('#sGem').value.trim();cfg.groqKey=$('#sGroq').value.trim();cfg.store=$('#sStore').value.trim()||'Repco';cfg.brands=$('#sBrands').value.trim()||DEFAULT_BRANDS;st.pcache={};cfg.speed=$('#sSpeed').value;gList=null;cfg.apiKey=$('#sKey').value.trim();cfg.model=$('#sModel').value;cfg.live=$('#sLive').checked;cfg.regcheck=$('#sReg').value.trim();saveCfg();$('#settings').hidden=true;};
+$('#sSave').onclick=()=>{cfg.provider=($$('input[name=prov]').find(r=>r.checked)||{}).value||'gemini';cfg.geminiKey=$('#sGem').value.trim();cfg.groqKey=$('#sGroq').value.trim();cfg.rules=$('#sRules').value;cfg.store=$('#sStore').value.trim()||'Repco';cfg.brands=$('#sBrands').value.trim()||DEFAULT_BRANDS;st.pcache={};cfg.speed=$('#sSpeed').value;gList=null;cfg.apiKey=$('#sKey').value.trim();cfg.model=$('#sModel').value;cfg.live=$('#sLive').checked;cfg.regcheck=$('#sReg').value.trim();saveCfg();$('#settings').hidden=true;};
 $('#sClear').onclick=()=>{cfg={};saveCfg();openSettings();};
 
 /* ---------- manual sketch + recent ---------- */

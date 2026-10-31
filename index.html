@@ -7,7 +7,7 @@
 <meta name="description" content="Find every part on your car by rego, VIN or model: OEM numbers, sizes, cross-references to Australian brands, and interactive engine diagrams.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=1793427056">
+<link rel="stylesheet" href="style.css?v=1793427422">
 </head>
 <body>
 <header class="top">
@@ -168,6 +168,9 @@
     <label class="lab" for="sBrands" style="margin-top:12px">Preferred brands (listed first)</label>
     <textarea id="sBrands" rows="2" style="width:100%"></textarea>
     <p class="small muted">Cross-references try these brands first and tag them as stocked by your store.</p>
+    <label class="lab" for="sRules" style="margin-top:12px">Number rules</label>
+    <textarea id="sRules" rows="3" style="width:100%;font-family:'IBM Plex Mono',monospace;font-size:13px" placeholder="Repco, Permaseal: rocker cover gasket|valve cover gasket = RC"></textarea>
+    <p class="small muted">One per line: <code>Brand, Brand: part word = PREFIX, PREFIX</code>. Numbers that don't match are thrown out. Use | for alternative part names. Example: <code>Ryco: oil filter = Z</code></p>
     <label class="check"><input id="sLive" type="checkbox"> Live retailer search: checks real Repco, Supercheap, Burson and other listings on the web and verifies cross-references (slower; free on Gemini up to 5,000 searches a month)</label>
     <details class="more"><summary>Advanced: automatic rego lookup (paid service, optional)</summary>
       <input id="sReg" type="text" placeholder="RegCheck username" style="width:100%;margin-top:8px">
@@ -177,7 +180,7 @@
   </div>
 </div>
 
-<script src="diagram.js?v=1793427056"></script>
-<script src="app.js?v=1793427056"></script>
+<script src="diagram.js?v=1793427422"></script>
+<script src="app.js?v=1793427422"></script>
 </body>
 </html>
