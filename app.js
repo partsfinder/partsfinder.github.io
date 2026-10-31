@@ -174,10 +174,13 @@ function oemOK(p,num){const k=makeKey();if(!k)return true;const n=normN(num);
   for(const[re,re2,fams]of OEM_FAMILY[k]){if(re.test(p.name||'')&&(!re2||re2.test(p.name||'')))return fams.some(f=>n.startsWith(f));}
   return true;}
 const looksFake=num=>{const n=normN(num);return n.length<4||/(000|001)$/.test(n)&&!/^\d{5}[A-Z0-9]{5}$/.test(n)||/(XXX|ABC|123456|EXAMPLE|SAMPLE)/.test(n);};
-function ruleOK(p,brand,num){const b=normN(brand),n=normN(num),name=(p.name||'').toLowerCase();
-  for(const r of parseRules()){if(r.brands.some(x=>b===x||b.startsWith(x))&&(!r.kw.length||r.kw.some(k=>name.includes(k))))return r.pre.some(x=>n.startsWith(x));}
-  return true;}
-function ruleText(){const rs=(cfg.rules??DEFAULT_RULES).split('\n').filter(l=>l.includes('='));return rs.length?`NUMBER FORMAT RULES (numbers that break these are rejected): ${rs.join('; ')}.`:'';}
+function ruleWhy(p,brand,num){const b=normN(brand),n=normN(num),name=(p.name||'').toLowerCase();
+  for(const r of parseRules()){const bm=!b||r.brands.some(x=>b===x||b.startsWith(x)),km=!r.kw.length||r.kw.some(k=>name.includes(k)),pm=r.pre.some(x=>n.startsWith(x));
+    if(b&&bm&&km&&!pm)return `${brand} ${r.kw[0]||'parts'} numbers start with ${r.pre.join(' or ')}`;
+    if(bm&&pm&&!km&&r.kw.length)return `${r.pre.join('/')} numbers are ${r.kw[0]}s, not ${p.name||'this part'}`;}
+  return null;}
+const ruleOK=(p,b,n)=>!ruleWhy(p,b,n);
+function ruleText(){const rs=(cfg.rules??DEFAULT_RULES).split('\n').filter(l=>l.includes('='));return rs.length?`NUMBER FORMAT RULES (each prefix is reserved for that part type and those parts use that prefix; numbers that break these are rejected): ${rs.join('; ')}. For example RC numbers are rocker/valve cover gaskets, never head gaskets.`:'';}
 /* ---------- prompts ---------- */
 function ctxLine(){const v=st.vehicle,e=st.engine;return `Vehicle: ${v.vehicle}${v.market?` (${v.market} market)`:''}${v.vinStr?`. VIN: ${v.vinStr}`:''}${v.rego?`. Rego: ${v.rego}`:''}. Engine: ${e?.label||'unknown'}${e?.code?` [${e.code}]`:''}.`;}
 function ctx(){return ctxLine()+` Known engine data: ${JSON.stringify(st.spec?.engine||{})}`;}
@@ -358,10 +361,10 @@ function scopeOK(brand,p){const k=normN(brand).toLowerCase();const re=BRAND_SCOP
 function normalizeItems(r,grounded,meta){const sup=normN(meta&&meta.supported||'');const hasSup=!!sup;(r.items||[]).forEach(p=>{if(!p)return;p.v=p.v||{};
   const oem=(Array.isArray(p.oem)?p.oem:p.oem?[p.oem]:[]).map(o=>typeof o==='string'?{number:o,source:null}:o).filter(o=>o&&o.number);
   p.rejected=[];
-  oem.forEach(o=>{if(!oemOK(p,o.number)||looksFake(o.number))p.rejected.push({brand:'OEM',number:o.number,why:looksFake(o.number)?'looks like a placeholder':'not a valid genuine number for this part'});});
-  const okOem=oem.filter(o=>oemOK(p,o.number)&&!looksFake(o.number));p.oem=okOem.map(o=>o.number);
+  oem.forEach(o=>{const w=ruleWhy(p,'',o.number);if(w){p.rejected.push({brand:'OEM',number:o.number,why:w});o.bad=true;return;}if(!oemOK(p,o.number)||looksFake(o.number))p.rejected.push({brand:'OEM',number:o.number,why:looksFake(o.number)?'looks like a placeholder':'not a valid genuine number for this part'});});
+  const okOem=oem.filter(o=>!o.bad&&oemOK(p,o.number)&&!looksFake(o.number));p.oem=okOem.map(o=>o.number);
   p.crossRefs=(p.crossRefs||[]).filter(c=>{if(!c||!c.number)return false;if(!scopeOK(c.brand,p)){p.rejected.push({brand:c.brand,number:c.number,why:`${c.brand} doesn't make this part`});return false;}
-    if(!ruleOK(p,c.brand,c.number)){p.rejected.push({brand:c.brand,number:c.number,why:'breaks your number rule'});return false;}
+    {const w=ruleWhy(p,c.brand,c.number);if(w){p.rejected.push({brand:c.brand,number:c.number,why:w});return false;}}
     if(looksFake(c.number)){p.rejected.push({brand:c.brand,number:c.number,why:'looks like a placeholder'});return false;}return true;});
   oem.splice(0,oem.length,...okOem);
   const judge=(num,src)=>{const n=normN(num);const url=/^https?:/.test(src||'');if(hasSup&&n.length>=4&&sup.includes(n))return'confirmed';return url?'claimed':'unconfirmed';};
